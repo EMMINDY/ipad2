@@ -1,0 +1,128 @@
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&display=swap');
+
+  :root {
+    --primary-color: #0d6efd;
+    --secondary-color: #6c757d;
+    --bg-gradient: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    --glass-bg: rgba(255, 255, 255, 0.85);
+    --glass-border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+
+  body {
+    font-family: 'Sarabun', sans-serif;
+    background: var(--bg-gradient);
+    min-height: 100vh;
+    padding-bottom: 80px; /* เผื่อพื้นที่ให้ปุ่มลอย */
+  }
+
+  /* --- LANDING PAGE --- */
+  .landing-section {
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+  }
+
+  .glass-card {
+    background: var(--glass-bg);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: 20px;
+    border: var(--glass-border);
+    padding: 40px 20px;
+    text-align: center;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+  }
+
+  /* โลโก้หน้าแรก (ปรับให้ยืดหยุ่น) */
+  .landing-logo {
+    width: 120px; /* ขนาดพื้นฐาน */
+    height: auto;
+    margin-bottom: 20px;
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1));
+    transition: transform 0.3s ease;
+  }
+  .landing-logo:hover { transform: scale(1.05); }
+
+  /* --- NAVBAR --- */
+  .custom-navbar {
+    background: white !important;
+    border-bottom: 1px solid rgba(0,0,0,0.05);
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  
+  .navbar-logo {
+    height: 40px; /* ความสูงโลโก้ในเมนู */
+    width: auto;
+    margin-right: 10px;
+  }
+
+  .navbar-brand span {
+    color: #333;
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+
+  /* --- DASHBOARD CARDS (Responsive Grid) --- */
+  .level-card {
+    border: none;
+    border-radius: 15px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: white;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    height: 100%; /* ให้การ์ดสูงเท่ากันในแถว */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .level-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 15px rgba(0,0,0,0.1);
+    background: #f8f9fa;
+  }
+
+  .level-card:active { transform: scale(0.95); }
+
+  .level-icon {
+    font-size: 2.5rem;
+    color: var(--primary-color);
+    margin-bottom: 10px;
+  }
+
+  /* --- RESPONSIVE TWEAKS --- */
+  
+  /* มือถือ (iPhone/Android) */
+  @media (max-width: 576px) {
+    .landing-logo { width: 100px; } /* ลดขนาดโลโก้ */
+    .glass-card { padding: 30px 15px; }
+    .level-card { padding: 15px; }
+    .level-icon { font-size: 2rem; }
+    h2 { font-size: 1.5rem; }
+    
+    /* ซ่อนหัวตารางในมือถือ แล้วแสดงแบบ Card */
+    .mobile-hidden { display: none !important; }
+    
+    /* ปรับตารางให้ดูง่ายขึ้น */
+    #dataTable td { padding: 8px 5px; font-size: 0.9rem; }
+    .badge { font-size: 0.75rem; font-weight: 500; }
+  }
+
+  /* แท็บเล็ต (iPad) */
+  @media (min-width: 577px) and (max-width: 991px) {
+    .landing-logo { width: 140px; }
+  }
+
+  .hidden { display: none !important; }
+  .fade-in { animation: fadeIn 0.5s ease-in-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+</style>
