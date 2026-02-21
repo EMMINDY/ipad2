@@ -230,17 +230,48 @@
   }
 
   function updateAdminStats(data) {
-     let pending=0, b=0, r=0, fix=0, nb=0, total=data.length;
-     data.forEach(i => {
+    let pending = 0, b = 0, r = 0, fix = 0, nb = 0;
+    
+    // นับสถานะอื่นๆ จากตารางตามปกติ
+    data.forEach(i => {
       if(i.docStatus === 'รอตรวจสอบ') pending++;
       let s = i.borrowStatus;
       if (s === 'ยังไม่ยืม') nb++;
-      else if (s === 'ยืมอยู่') b++;
+      else if (s === 'ยืมอยู่') b++; 
       else if (s.includes('คืน')) r++;
       else if (s.includes('ซ่อม') || s.includes('สละ')) fix++;
     });
-    $('#stat-total').text(total); $('#stat-notborrow').text(nb); $('#stat-pending').text(pending);
-    $('#stat-borrowed').text(b); $('#stat-returned').text(r); $('#stat-repair').text(fix);
+
+    let selectedLevel = $('#adminLevelFilter').val();
+
+    if (selectedLevel === "") {
+       // --- ถ้ายืนอยู่หน้า "ทุกระดับชั้น" ---
+       // ระหว่างรอระบบไปนับจาก Google Sheet ให้ขึ้นไอคอนโหลดรอไว้
+       $('#stat-total').html('<i class="fas fa-spinner fa-spin" style="font-size: 14px;"></i>');
+       $('#stat-borrowed').html('<i class="fas fa-spinner fa-spin" style="font-size: 14px;"></i>');
+       
+       // ให้ระบบวิ่งไปนับยอดที่พิมพ์ชื่อไว้ใน "รายงานทะเบียนทรัพย์สิน" จริงๆ แบบ Real-time
+       google.script.run.withSuccessHandler(function(stats) {
+           $('#stat-total').text(stats.total);       // ยอดรวม (ตามที่ตั้งไว้)
+           $('#stat-borrowed').text(stats.borrowed); // ยอดยืม (นับตามที่มีชื่อในชีตเป๊ะๆ)
+       }).getDashboardStats();
+
+       // ส่วนสถานะอื่นๆ โชว์ตามฐานข้อมูลปกติ
+       $('#stat-notborrow').text(nb); 
+       $('#stat-pending').text(pending);
+       $('#stat-returned').text(r); 
+       $('#stat-repair').text(fix);
+
+    } else {
+       // --- ถ้าแอดมินกด Filter ดูทีละระดับชั้น/ห้อง ---
+       // ให้แสดงยอดตามจำนวนเด็กจริงๆ ในตารางหน้าจอนั้น
+       $('#stat-total').text(data.length); 
+       $('#stat-borrowed').text(b); 
+       $('#stat-notborrow').text(nb); 
+       $('#stat-pending').text(pending);
+       $('#stat-returned').text(r); 
+       $('#stat-repair').text(fix);
+    }
   }
 
   function initAdminTable(data) {
@@ -801,18 +832,19 @@ function saveBulkMatches() {
     });
   }
 
-  // เพิ่มฟังก์ชันนี้ใน JavaScript.html
-function loadDashboardStats() {
-  google.script.run.withSuccessHandler(function(stats) {
-    // แสดงผลตัวเลข (ตรวจสอบ ID ของ Element ในหน้า HTML ของคุณให้ตรงกัน)
-    // ตัวอย่าง: ถ้ามี <span id="totalCount">...</span>
-    
-    $('#totalAssetsText').text(stats.total.toLocaleString());   // ยอดทั้งหมด
-    $('#borrowedCountText').text(stats.borrowed.toLocaleString()); // ยืมแล้ว
-    $('#availableCountText').text(stats.available.toLocaleString()); // คงเหลือ
-    
-    console.log("Stats Updated:", stats);
-  }).getDashboardStats();
-}
-
+// --- ฟังก์ชันดึงสถิติ Dashboard ---
+  function loadDashboardStats() {
+    google.script.run
+      .withSuccessHandler(function(stats) {
+        if(document.getElementById('totalAssetsText')) {
+          document.getElementById('totalAssetsText').innerText = stats.total;
+          document.getElementById('borrowedCountText').innerText = stats.borrowed;
+          document.getElementById('availableCountText').innerText = stats.available;
+        }
+      })
+      .withFailureHandler(function(error) {
+        console.error("Error loading stats:", error);
+      })
+      .getDashboardStats();
+  }
 </script>
