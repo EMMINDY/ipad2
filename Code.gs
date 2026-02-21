@@ -578,44 +578,34 @@ function adminAddUser(data) {
 }
 
 // ==========================================
-// 6. DASHBOARD STATS SYSTEM (เพิ่มใหม่)
+// 6. DASHBOARD STATS SYSTEM 
 // ==========================================
-
 function getDashboardStats() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const assetSheet = ss.getSheetByName(SHEET_NAMES.ASSETS);
   
-  // ค่าเริ่มต้น
+  // ล็อคยอดทั้งหมดไว้ที่ 2085 เครื่อง
   let stats = {
-    total: 0,      // ทั้งหมด
-    borrowed: 0,   // ยืมแล้ว
-    available: 0   // ว่าง
+    total: 2085,
+    borrowed: 0,
+    available: 0
   };
-
+  
   if (assetSheet) {
     const lastRow = assetSheet.getLastRow();
     if (lastRow > 1) {
-      // 1. ยอดทั้งหมด = จำนวนแถวทั้งหมด ลบ 1 (หัวตาราง)
-      stats.total = lastRow - 1;
-
-      // 2. หายอดยืม = นับแถวที่มี "ชื่อ-สกุล" (Col E)
-      // อ่านข้อมูลเฉพาะคอลัมน์ E (Column index 5)
-      const data = assetSheet.getRange(2, 5, stats.total, 1).getValues();
-      
-      // นับจำนวนช่องที่ไม่ว่าง
+      // นับแถวที่มีชื่อในคอลัมน์ E
+      const data = assetSheet.getRange(2, 5, lastRow - 1, 1).getValues();
       let count = 0;
       for (let i = 0; i < data.length; i++) {
-        // ตรวจสอบว่ามีชื่อไหม (ตัดช่องว่างหน้าหลังออกแล้วเช็คว่าไม่ว่าง)
         if (String(data[i][0]).trim() !== "") {
           count++;
         }
       }
       stats.borrowed = count;
-      
-      // 3. ยอดว่าง
-      stats.available = stats.total - stats.borrowed;
     }
   }
   
+  stats.available = stats.total - stats.borrowed;
   return stats;
 }
