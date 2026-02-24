@@ -1,850 +1,2384 @@
 <script>
-  // --- GLOBAL VARIABLES ---
-  let table, adminTable;
-  let allData = []; 
-  let groupedData = {};
-  let currentLevel = '';
-  let isReadOnly = false;
-  
-  // Login State
-  let currentUserRole = ''; 
-  let currentAdvisorName = '';
-  let currentAdvisorLevel = ''; 
-  let currentAdvisorRoom = '';  
+// ==========================================
+// ระบบตรวจสอบสถานะ iPad - Client-side Script
+// ==========================================
 
-  // Filters
-  let uniqueLevels = new Set();
-  let uniqueRooms = new Set();
+// ─── State Variables ───────────────────────────────────────
+var systemData        = [];
+var currentLevel      = '';
+var currentRoom       = '';
+var adminMode         = 'all';
+var currentUser       = null;
+var dataTableInstance = null;
+var adminDataTableInstance = null;
+var auditOrphansData  = [];
+var uploadDocPersonList = [];
+var _dataLoaded       = false;
+var _adminSearchQuery = '';
+var _searchDebounce   = null;
 
-  // --- INITIALIZATION ---
-  $(document).ready(function() { 
-    loadSystemData(); 
-  });
+// ─── Preview State ──────────────────────────────────────────
+var _previewScale    = 1;
+var _previewRotation = 0;
 
-  // --- 1. DATA LOADING ---
-  function loadSystemData(callback) {
-    google.script.run.withSuccessHandler(function(data) {
-      processData(data);
-      $('#loading-spinner').addClass('hidden');
-      if(callback) callback();
-    }).getAllSystemData();
-    loadDashboardStats();
+// ─── Table Search ────────────────────────────────────────────
+var _tableSearchQuery = '';
+var _tableSearchDebounce = null;
+
+// ==========================================
+// UTILITY FUNCTIONS
+// ==========================================
+
+function btnClick(btn, fn) {
+  if (btn && btn.disabled) return;
+  var origHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>';
   }
-
-  function processData(data) {
-    allData = data;
-    groupedData = {};
-    
-    data.forEach(item => {
-      let lvl = item.type === 'teacher' ? 'บุคลากร' : (item.source_sheet.match(/(ม\.\d+)/) ? item.source_sheet.match(/(ม\.\d+)/)[0] : 'อื่นๆ');
-      if(!groupedData[lvl]) groupedData[lvl] = [];
-      groupedData[lvl].push(item);
-    });
-    
-    initAdminFilters();
-
-    // รีเฟรชหน้าจอที่เปิดอยู่
-    if(!$('#view-dashboard').hasClass('hidden')) renderDashboard();
-    if(!$('#view-admin').hasClass('hidden')) filterAdminTable(); 
-    if(!$('#view-table').hasClass('hidden') && currentLevel) {
-       let items = groupedData[currentLevel];
-       let selected = $('#roomFilter').val();
-       if(selected) items = items.filter(i => i.room == selected);
-       renderTable(items);
-    }
-  }
-
-  // --- 2. NAVIGATION ---
-  function enterSystem() {
-    isReadOnly = false;
-    $('#admin-float-btn').removeClass('hidden');
-    $('#loading-spinner').removeClass('hidden'); 
-    
-    if(allData.length > 0) {
-       goHome();
-    } else { 
-       let checkData = setInterval(() => { 
-         if(allData.length > 0) { clearInterval(checkData); goHome(); } 
-       }, 500); 
-    }
-  }
-
-  function goHome() {
-    $('.landing-section, #view-table, #view-admin').addClass('hidden');
-    $('#loading-spinner').addClass('hidden');
-    $('#main-nav').removeClass('hidden');
-    $('#view-dashboard').removeClass('hidden');
-    renderDashboard();
-    window.scrollTo(0, 0);
-  }
-
-  function goLanding() {
-    $('.landing-section').removeClass('hidden');
-    $('#loading-spinner').addClass('hidden'); 
-    $('#main-nav, #view-dashboard, #view-table, #view-admin').addClass('hidden');
-    isReadOnly = false;
-    currentUserRole = '';
-    window.scrollTo(0, 0);
-  }
-
-  function goBackToDashboard() {
-    $('#view-table').addClass('hidden');
-    $('#view-dashboard').removeClass('hidden');
-  }
-
-  // --- 3. DASHBOARD & TABLE ---
-  function renderDashboard() {
-    let container = $('#dashboard-grid').empty();
-    Object.keys(groupedData).sort().forEach(lvl => {
-      let count = groupedData[lvl].length;
-      let icon = lvl === 'บุคลากร' ? 'fa-chalkboard-teacher' : 'fa-graduation-cap';
-      let html = `
-        <div class="col-6 col-md-4 col-lg-3">
-          <div class="card level-card h-100" onclick="selectLevel('${lvl}')">
-            <div class="level-icon"><i class="fas ${icon}"></i></div>
-            <h5 class="fw-bold mb-0 text-dark">${lvl}</h5>
-            <span class="badge bg-light text-secondary mt-2 rounded-pill">${count} คน</span>
-          </div>
-        </div>`;
-      container.append(html);
-    });
-  }
-
-  function selectLevel(lvl) {
-    currentLevel = lvl;
-    $('#view-dashboard').addClass('hidden'); 
-    $('#view-table').removeClass('hidden');
-    
-    $('#table-title').text(lvl); 
-    $('#table-badge').text('ทั้งหมด ' + groupedData[lvl].length + ' คน');
-    
-    let items = groupedData[lvl];
-    let rooms = new Set();
-    items.forEach(i => { if(i.room) rooms.add(i.room); });
-    
-    let roomSelect = $('#roomFilter').html('<option value="">แสดงทั้งหมด</option>');
-    Array.from(rooms).sort((a,b) => parseInt(a) - parseInt(b)).forEach(r => {
-      if(r && r !== 'ห้องพักครู') roomSelect.append(`<option value="${r}">ห้อง ${r}</option>`);
-    });
-    
-    renderTable(items);
-  }
-
-  function filterByRoom() {
-    let selected = $('#roomFilter').val();
-    let items = groupedData[currentLevel];
-    if(selected) items = items.filter(i => i.room == selected);
-    renderTable(items);
-  }
-
-  function renderTable(data) {
-    if ($.fn.DataTable.isDataTable('#dataTable')) table.destroy();
-    
-    let cols = [
-      { data: 'id', title: 'รหัส' },
-      { data: 'name', title: 'ชื่อ - สกุล', render: d => `<div style="line-height:1.2;">${d}</div>` },
-      { data: 'borrowStatus', title: 'สถานะ', render: d => badgeBorrow(d) },
-      { data: 'docStatus', title: 'เอกสาร', render: d => badgeDoc(d) },
-      { data: 'room', title: 'ห้อง', className: 'mobile-hidden' },
-      { data: 'serial', title: 'Serial', className: 'mobile-hidden' },
-      { 
-        title: 'แก้ไข', 
-        data: null, 
-        orderable: false, 
-        className: 'text-center',
-        render: (d, type, row) => {
-          if (row.docStatus === 'เอกสารผ่าน') {
-             return `<span class="badge bg-success bg-opacity-10 text-success border border-success px-2 py-1"><i class="fas fa-check-circle"></i> ผ่านแล้ว</span>`;
-          }
-          return `<button class="btn btn-sm btn-light text-primary shadow-sm border" onclick="openModal('${encodeURIComponent(JSON.stringify(row))}')"><i class="fas fa-pen"></i></button>`;
-        }
-      }
-    ];
-
-    table = $('#dataTable').DataTable({
-      data: data, destroy: true, autoWidth: false, columns: cols,
-      language: { search: "", searchPlaceholder: "ค้นหา...", zeroRecords: "ไม่พบข้อมูล" },
-      pageLength: 20, lengthChange: false, 
-      dom: '<"row mb-2"<"col-12"f>>rt<"d-flex justify-content-center mt-3"p>'
-    });
-  }
-
-  // --- 4. ADMIN SYSTEM & FILTERS ---
-  function initAdminFilters() {
-    uniqueLevels.clear();
-    allData.forEach(item => {
-      let lvl = item.source_sheet.replace('รายชื่อนักเรียน ', '').replace('รายชื่อ', '');
-      if(lvl) uniqueLevels.add(lvl);
-    });
-
-    let lvlSelect = $('#adminLevelFilter');
-    lvlSelect.html('<option value="">ทุกระดับชั้น</option>');
-    Array.from(uniqueLevels).sort().forEach(l => {
-      lvlSelect.append(`<option value="${l}">${l}</option>`);
-    });
-    updateRoomFilter();
-  }
-
-  function updateRoomFilter() {
-    let selectedLevel = $('#adminLevelFilter').val();
-    let roomSelect = $('#adminRoomFilter');
-    roomSelect.html('<option value="">ทุกห้อง</option>');
-
-    let roomsToShow = new Set();
-    allData.forEach(item => {
-      let lvl = item.source_sheet.replace('รายชื่อนักเรียน ', '').replace('รายชื่อ', '');
-      if (selectedLevel === "" || lvl === selectedLevel) {
-        if(item.room) roomsToShow.add(item.room);
-      }
-    });
-
-    Array.from(roomsToShow).sort((a,b) => parseInt(a)-parseInt(b)).forEach(r => {
-      roomSelect.append(`<option value="${r}">ห้อง ${r}</option>`);
-    });
-  }
-
-  function filterAdminTable() {
-    if(event && event.target && event.target.id === 'adminLevelFilter') updateRoomFilter();
-
-    let lvl = $('#adminLevelFilter').val();
-    let rm = $('#adminRoomFilter').val();
-    
-    let filteredData = allData.filter(item => {
-      let itemLvl = item.source_sheet.replace('รายชื่อนักเรียน ', '').replace('รายชื่อ', '');
-      let matchLvl = (lvl === "") || (itemLvl === lvl);
-      let matchRoom = (rm === "") || (String(item.room) === String(rm));
-      
-      if(currentUserRole === 'advisor') {
-         return matchLvl && matchRoom && item.source_sheet.includes(currentAdvisorLevel) && String(item.room) === String(currentAdvisorRoom);
-      }
-      return matchLvl && matchRoom;
-    });
-
-    updateAdminStats(filteredData);
-
-    if ($.fn.DataTable.isDataTable('#adminTable')) {
-        adminTable.clear().rows.add(filteredData).draw();
-    } else {
-        initAdminTable(filteredData);
-    }
-  }
-
-  function updateAdminStats(data) {
-    let pending = 0, b = 0, r = 0, fix = 0, nb = 0;
-    
-    // นับสถานะอื่นๆ จากตารางตามปกติ
-    data.forEach(i => {
-      if(i.docStatus === 'รอตรวจสอบ') pending++;
-      let s = i.borrowStatus;
-      if (s === 'ยังไม่ยืม') nb++;
-      else if (s === 'ยืมอยู่') b++; 
-      else if (s.includes('คืน')) r++;
-      else if (s.includes('ซ่อม') || s.includes('สละ')) fix++;
-    });
-
-    let selectedLevel = $('#adminLevelFilter').val();
-
-    if (selectedLevel === "") {
-       // --- ถ้ายืนอยู่หน้า "ทุกระดับชั้น" ---
-       // ระหว่างรอระบบไปนับจาก Google Sheet ให้ขึ้นไอคอนโหลดรอไว้
-       $('#stat-total').html('<i class="fas fa-spinner fa-spin" style="font-size: 14px;"></i>');
-       $('#stat-borrowed').html('<i class="fas fa-spinner fa-spin" style="font-size: 14px;"></i>');
-       
-       // ให้ระบบวิ่งไปนับยอดที่พิมพ์ชื่อไว้ใน "รายงานทะเบียนทรัพย์สิน" จริงๆ แบบ Real-time
-       google.script.run.withSuccessHandler(function(stats) {
-           $('#stat-total').text(stats.total);       // ยอดรวม (ตามที่ตั้งไว้)
-           $('#stat-borrowed').text(stats.borrowed); // ยอดยืม (นับตามที่มีชื่อในชีตเป๊ะๆ)
-       }).getDashboardStats();
-
-       // ส่วนสถานะอื่นๆ โชว์ตามฐานข้อมูลปกติ
-       $('#stat-notborrow').text(nb); 
-       $('#stat-pending').text(pending);
-       $('#stat-returned').text(r); 
-       $('#stat-repair').text(fix);
-
-    } else {
-       // --- ถ้าแอดมินกด Filter ดูทีละระดับชั้น/ห้อง ---
-       // ให้แสดงยอดตามจำนวนเด็กจริงๆ ในตารางหน้าจอนั้น
-       $('#stat-total').text(data.length); 
-       $('#stat-borrowed').text(b); 
-       $('#stat-notborrow').text(nb); 
-       $('#stat-pending').text(pending);
-       $('#stat-returned').text(r); 
-       $('#stat-repair').text(fix);
-    }
-  }
-
-  function initAdminTable(data) {
-    adminTable = $('#adminTable').DataTable({
-      data: data,
-      columns: [
-        { data: 'id' }, { data: 'name' },
-        { data: 'borrowStatus', render: d => badgeBorrow(d) }, 
-        { data: 'docStatus', render: d => badgeDoc(d) },       
-        { data: null, render: (d,t,r) => {
-           let btns = `<div class="d-flex gap-2 justify-content-center">`;
-           btns += `<button class="btn btn-sm btn-warning rounded-pill px-3" onclick="openAdminEdit('${encodeURIComponent(JSON.stringify(r))}')"><i class="fas fa-edit"></i></button>`;
-           if (currentUserRole === 'admin') {
-               btns += `<button class="btn btn-sm btn-outline-danger rounded-pill px-3" onclick="confirmDeleteUser('${encodeURIComponent(JSON.stringify(r))}')"><i class="fas fa-trash-alt"></i></button>`;
-           }
-           btns += `</div>`;
-           return btns;
-        }}
-      ]
-    });
-  }
-
-  function renderAdminDashboard() {
-    let titleText = 'ผู้ดูแลระบบ';
-    let showAddBtn = true;
-    if (currentUserRole === 'advisor') {
-        showAddBtn = false;
-        titleText = `ครูที่ปรึกษา (${currentAdvisorLevel}/${currentAdvisorRoom})`;
-    }
-    $('#admin-title-text').text(titleText);
-    if(showAddBtn) $('#btn-add-user').show(); else $('#btn-add-user').hide();
-    filterAdminTable();
-  }
-
- function openMissingAudit() {
-    // 1. อ้างอิง Element ของ Modal
-    const modalEl = document.getElementById('auditModal');
-    
-    // 2. สร้าง Modal Object
-    // ตรวจสอบว่ามี Instance เดิมอยู่ไหม (ป้องกัน error)
-    let modal = bootstrap.Modal.getInstance(modalEl);
-    if (!modal) {
-        modal = new bootstrap.Modal(modalEl);
-    }
-    
-    // 3. เพิ่มคำสั่ง: เมื่อกดปิด Modal (hidden.bs.modal) ให้ไปโหลดข้อมูลหน้าหลักใหม่
-    // ใช้ { once: true } เพื่อให้คำสั่งนี้ทำงานแค่ครั้งเดียวต่อการเปิด 1 ครั้ง
-    modalEl.addEventListener('hidden.bs.modal', function () {
-        loadSystemData(); // <--- โหลดข้อมูลหลักตรงนี้แทน เพื่อไม่ให้ค้าง
-    }, { once: true });
-
-    // 4. แสดง Modal
-    modal.show();
-
-    // 5. แสดงสถานะกำลังโหลดในตาราง
-    $('#auditTableBody').html('<tr><td colspan="4" class="text-center py-5"><div class="spinner-border text-warning"></div><div class="mt-2">กำลังวิเคราะห์ข้อมูล...</div></td></tr>');
-    
-    // 6. เรียก Backend ดึงข้อมูล
-    google.script.run.withSuccessHandler(function(orphans) {
-      renderAuditTable(orphans);
-    }).getAssetAuditData();
-  }
-
-  function renderAuditTable(orphans) {
-    let html = '';
-    
-    // --- ส่วนหัว: เพิ่มปุ่มบันทึกแบบกลุ่ม (Bulk Save) ---
-    if(orphans.length > 0) {
-      // แทรกปุ่มบันทึกไว้ที่ข้อความนับจำนวน (หรือตำแหน่งที่คุณต้องการ)
-      $('#auditCountText').html(`
-        <span>พบตกหล่น ${orphans.length} รายการ</span>
-        <button class="btn btn-success btn-sm ms-3 shadow-sm" onclick="saveBulkMatches()">
-          <i class="fas fa-save"></i> บันทึกรายการที่เลือก
-        </button>
-      `);
-    }
-
-    if(orphans.length === 0) {
-      // --- กรณีไม่พบข้อมูลตกหล่น ---
-      html = `<tr><td colspan="5" class="text-center py-5 text-success">
-                <i class="fas fa-check-circle fa-3x mb-3"></i><br>
-                <h5>ยอดเยี่ยม! ไม่พบรายชื่อตกหล่น</h5>
-                ข้อมูลในทะเบียนทรัพย์สินตรงกับรายชื่อทุกคนแล้ว
-              </td></tr>`;
-    } else {
-      // --- กรณีพบข้อมูลตกหล่น: สร้างตาราง ---
-      orphans.forEach((item, index) => {
-        
-        // 1. สร้าง Dropdown เลือกชื่อ
-        let optionsHtml = '';
-        if(item.suggestions.length > 0) {
-           // มีชื่อใกล้เคียง
-           item.suggestions.forEach(s => {
-             // value เก็บชื่อที่ถูกต้อง
-             optionsHtml += `<option value="${s.name}">${s.name} (${s.sheet})</option>`;
-           });
-           optionsHtml += `<option value="" disabled>--- ไม่ใช่คนเหล่านี้ ---</option>`;
-        } else {
-           // ไม่พบชื่อใกล้เคียงเลย
-           optionsHtml = `<option value="" disabled selected>ไม่พบชื่อใกล้เคียง</option>`;
-        }
-
-        let selectId = `match_select_${index}`;
-        
-        // 2. เก็บข้อมูล Meta Data ไว้ใน Checkbox (เพื่อส่งไปบันทึก)
-        // ต้องเก็บ: ชื่อเดิม, Serial, และ ID ของ Dropdown เพื่อไปดึงค่าที่เลือก
-        let metaData = encodeURIComponent(JSON.stringify({
-            oldName: item.assetName,
-            serial: item.serial,
-            selectId: selectId
-        }));
-
-        // 3. สร้าง HTML ของแถว
-        html += `
-          <tr>
-            <td class="text-center align-middle">
-              <input type="checkbox" class="form-check-input audit-checkbox" 
-                     data-meta="${metaData}" style="transform: scale(1.3); cursor: pointer;">
-            </td>
-
-            <td class="fw-bold text-danger align-middle">
-                ${item.assetName} 
-                <br><small class="text-muted fw-normal">Serial: ${item.serial}</small>
-            </td>
-
-            <td class="align-middle">
-              <select id="${selectId}" class="form-select form-select-sm shadow-sm border-primary">
-                ${optionsHtml}
-              </select>
-            </td>
-            
-            <td class="text-center align-middle text-muted small">
-                <span class="badge bg-light text-dark border">เลือกชื่อแล้วติ๊กถูก</span>
-            </td>
-          </tr>
-        `;
+  try {
+    var result = typeof fn === 'function' ? fn() : undefined;
+    if (result && typeof result.then === 'function') {
+      result.finally(function () {
+        if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
       });
+    } else {
+      setTimeout(function () {
+        if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+      }, 500);
     }
-    
-    $('#auditTableBody').html(html);
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+    showError(e);
+  }
 }
 
-// ฟังก์ชันสำหรับปุ่ม "บันทึกรายการที่เลือก"
-function saveBulkMatches() {
-  let selectedItems = []; 
-  
-  $('.audit-checkbox:checked').each(function() {
-    let meta = JSON.parse(decodeURIComponent($(this).attr('data-meta')));
-    let selectedName = $(`#${meta.selectId}`).val();
-    
-    if (selectedName) {
-      selectedItems.push({
-        oldAssetName: meta.oldName,
-        serial: meta.serial,
-        correctName: selectedName
-      });
-    }
-  });
+function showGlobalLoading(message) {
+  var overlay = document.getElementById('global-loading-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  overlay.classList.remove('hidden');
+  var txt = document.getElementById('global-loading-text');
+  if (txt) txt.textContent = message || 'กำลังประมวลผล...';
+}
 
-  if (selectedItems.length === 0) {
-    return Swal.fire('แจ้งเตือน', 'กรุณาติ๊กเลือกรายการที่ต้องการแก้ไขก่อน', 'warning');
+function hideGlobalLoading() {
+  var overlay = document.getElementById('global-loading-overlay');
+  if (!overlay) return;
+  overlay.classList.add('hidden');
+  overlay.style.display = 'none';
+}
+
+function normalizeRoomValue(val) {
+  if (val == null) return '';
+  var s = String(val).trim();
+  if (!s) return '';
+  return s.split('/').pop();
+}
+
+function getBorrowBadgeClass(status) {
+  var map = {
+    'ยืมอยู่': 'success',
+    'อยู่ระหว่างการส่งคืน': 'warning text-dark',
+    'คืนแล้ว': 'primary',
+    'ส่งซ่อม': 'danger',
+    'สละสิทธิ์': 'danger'
+  };
+  return map[status] || 'secondary';
+}
+
+function getDocBadgeClass(status) {
+  var map = {
+    'เอกสารผ่าน': 'success',
+    'เอกสารไม่ผ่าน': 'danger',
+    'รอตรวจสอบ': 'warning text-dark'
+  };
+  return map[status] || 'secondary';
+}
+
+function escapeHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function showError(err) {
+  var msg = (err && err.message) ? err.message : (typeof err === 'string' ? err : 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ');
+  Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: msg, confirmButtonText: 'ตกลง' });
+}
+
+function readFileAsBase64(file, callback) {
+  if (!file) { callback(null); return; }
+  var reader = new FileReader();
+  reader.onload = function (e) { callback(typeof e.target.result === 'string' ? e.target.result : null); };
+  reader.onerror = function () { callback(null); };
+  reader.readAsDataURL(file);
+}
+
+function getTimestamp() {
+  var d = new Date();
+  var pad = function (n) { return String(n).padStart(2, '0'); };
+  return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes());
+}
+
+// ==========================================
+// TOAST / CONFIRM
+// ==========================================
+
+function showToast(message, type, duration) {
+  type = type || 'success';
+  duration = duration || 2500;
+  Swal.fire({
+    toast: true, position: 'top-end', icon: type, title: message,
+    showConfirmButton: false, timer: duration, timerProgressBar: true
+  });
+}
+
+function confirmAction(title, text, confirmText) {
+  return Swal.fire({
+    title: title || 'ยืนยัน?', text: text || '', icon: 'question',
+    showCancelButton: true, confirmButtonText: confirmText || 'ยืนยัน',
+    cancelButtonText: 'ยกเลิก', confirmButtonColor: '#0d6efd', reverseButtons: true
+  });
+}
+
+// ==========================================
+// INIT
+// ==========================================
+
+$(document).ready(function () {
+  var loader = document.getElementById('initial-page-loader');
+  if (loader) loader.style.display = 'none';
+  // ── Preload data ในพื้นหลัง ──
+  setTimeout(function() {
+    if (!_dataLoaded) {
+      _loadSystemDataWithRetry(0, function() {
+        // data พร้อมใน background แล้ว
+      }, function() { /* silent fail — จะ retry เมื่อผู้ใช้กด */ });
+    }
+  }, 600);
+});
+
+// ==========================================
+// VIEW MANAGEMENT
+// ==========================================
+
+function showView(id) {
+  ['view-landing', 'view-dashboard', 'view-room', 'view-table', 'view-admin'].forEach(function (v) {
+    var el = document.getElementById(v);
+    if (el) el.classList.add('hidden');
+  });
+  var target = document.getElementById(id);
+  if (target) target.classList.remove('hidden');
+  var nav = document.getElementById('main-nav');
+  if (nav) nav.classList.toggle('hidden', id === 'view-landing');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function goLanding() {
+  currentUser = null;
+  _dataLoaded = false;
+  systemData  = [];
+  showView('view-landing');
+}
+
+function goHome() {
+  if (currentUser && (currentUser.role === 'advisor' || currentUser.role === 'admin')) {
+    showView('view-admin');
+    if (_dataLoaded && systemData.length) {
+      updateAdminUIForRole();
+      updateAdminStats();
+      _updateModeButtonCounts();
+      filterAdminTable();
+    } else {
+      loadAdminView();
+    }
+  } else {
+    goToDashboard();
+  }
+}
+
+function goToDashboard() {
+  showView('view-dashboard');
+  if (_dataLoaded && systemData.length) {
+    renderDashboardGrid();
+  } else {
+    loadDashboard();
+  }
+}
+
+// Alias สำหรับ backward-compat
+function goBackToDashboard() { goToDashboard(); }
+
+function goToRoomPicker() {
+  if (!currentLevel) { goToDashboard(); return; }
+  showView('view-room');
+  renderRoomPicker(currentLevel);
+}
+
+function enterSystem() {
+  showView('view-dashboard');
+  if (_dataLoaded && systemData.length) {
+    renderDashboardGrid();
+  } else {
+    loadDashboard();
+  }
+}
+
+// ==========================================
+// DASHBOARD — Step 1: เลือกระดับชั้น
+// ==========================================
+
+// ── ฟังก์ชัน retry wrapper สำหรับ GAS calls ──
+var _retryCount = 0;
+var _MAX_RETRY  = 2;
+
+function _callWithRetry(fn, onSuccess, onFail, retryMsg) {
+  function attempt(n) {
+    google.script.run
+      .withSuccessHandler(function(data) { _retryCount = 0; onSuccess(data); })
+      .withFailureHandler(function(err) {
+        var msg = (err && err.message) ? err.message : String(err || '');
+        var isBusy = msg.indexOf('ยุ่งอยู่') >= 0 || msg.indexOf('timeout') >= 0 || msg.indexOf('lock') >= 0;
+        if (isBusy && n < _MAX_RETRY) {
+          var wait = (n + 1) * 2000;
+          showGlobalLoading((retryMsg || 'กำลังโหลด') + ' (ลองใหม่ครั้งที่ ' + (n+1) + '...)');
+          setTimeout(function() { attempt(n + 1); }, wait);
+        } else {
+          _retryCount = 0;
+          if (typeof onFail === 'function') onFail(err);
+        }
+      })
+      [fn.name || 'getAllSystemData'].apply(google.script.run, fn.args || []);
+  }
+  attempt(0);
+}
+
+function loadDashboard() {
+  showGlobalLoading('กำลังโหลดข้อมูล...');
+
+  if (_dataLoaded && systemData.length) {
+    _updateDashboardStats();
+    renderDashboardGrid();
+    hideGlobalLoading();
+    return;
   }
 
-  Swal.fire({
-    title: `ยืนยันแก้ไข ${selectedItems.length} รายการ?`,
-    text: "ระบบจะอัปเดตชื่อในทะเบียนทรัพย์สินตามที่คุณเลือก",
-    icon: 'question',
-    showCancelButton: true,
-    confirmButtonColor: '#198754',
-    confirmButtonText: 'ยืนยัน, บันทึกเลย!',
-    cancelButtonText: 'ยกเลิก'
-  }).then((result) => {
-    if (result.isConfirmed) {
-      Swal.fire({ title: 'กำลังบันทึก...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+  // Quick stats ก่อน (เร็ว — โหลดสถิติสำหรับ grid)
+  google.script.run
+    .withSuccessHandler(function(stats) {
+      if (!stats) return;
+      document.getElementById('totalAssetsText').textContent   = 2085;
+      document.getElementById('borrowedCountText').textContent  = stats.borrowed || 0;
+      document.getElementById('availableCountText').textContent = 2085 - (stats.borrowed || 0);
+      _renderDashboardFromStats(stats.levels || {});
+    })
+    .withFailureHandler(function() {})
+    .getQuickStats();
+
+  // Full data — retry อัตโนมัติ ถ้า busy
+  _loadSystemDataWithRetry(0, function() {
+    _updateDashboardStats();
+    renderDashboardGrid();
+    hideGlobalLoading();
+    if (!systemData.length) {
+      Swal.fire({ icon:'info', title:'ไม่พบรายชื่อ', text:'กรุณาตรวจสอบชีตใน Google Sheets' });
+    }
+  }, function(err) {
+    hideGlobalLoading();
+    showError(err);
+  });
+}
+
+/**
+ * โหลด systemData พร้อม retry อัตโนมัติ (สูงสุด 3 ครั้ง, ห่างกัน 3 วินาที)
+ */
+function _loadSystemDataWithRetry(attempt, onSuccess, onFail) {
+  var MAX = 3;
+  showGlobalLoading('กำลังโหลดข้อมูล...');
+  google.script.run
+    .withSuccessHandler(function(data) {
+      hideGlobalLoading();
+      systemData = data || [];
+      uploadDocPersonList = systemData;
+      _dataLoaded = true;
+      console.log('System data loaded successfully, count:', systemData.length);
+      onSuccess();
+    })
+    .withFailureHandler(function(err) {
+      hideGlobalLoading();
+      var msg = (err && err.message) ? err.message : String(err || '');
+      console.error('Load system data failed:', msg, 'Attempt:', attempt + 1);
       
-      google.script.run.withSuccessHandler(res => {
-        if(res.success) {
-          Swal.fire({
-             icon: 'success', 
-             title: 'บันทึกสำเร็จ!', 
-             text: `แก้ไขเรียบร้อย ${res.count} รายการ\nระบบกำลังอัปเดตยอดรวม...`,
-             timer: 2000,
-             showConfirmButton: false
-          }).then(() => {
-             // 1. โหลดหน้า Audit ใหม่ทันที
-             openMissingAudit(); 
-             
-             // 2. หน่วงเวลา 2.5 วินาที แล้วค่อยโหลดข้อมูลหลัก (เพื่อให้ Sheet คำนวณทัน)
-             setTimeout(() => {
-                console.log("Reloading system data...");
-                loadSystemData(); 
-             }, 2500);
+      var isRetryable = msg.indexOf('ยุ่งอยู่') >= 0 ||
+                        msg.indexOf('lock') >= 0 ||
+                        msg.indexOf('timeout') >= 0 ||
+                        msg.indexOf('Timeout') >= 0;
+                        
+      if (isRetryable && attempt < MAX) {
+        var wait = (attempt + 1) * 3000; // 3s, 6s, 9s
+        showGlobalLoading('กำลังโหลดข้อมูล... (ลองใหม่ครั้งที่ ' + (attempt+1) + ')');
+        setTimeout(function() { _loadSystemDataWithRetry(attempt + 1, onSuccess, onFail); }, wait);
+      } else {
+        console.error('Max retry attempts reached, failing...');
+        onFail(err);
+      }
+    })
+    .getAllSystemData();
+}
+
+function _updateDashboardStats() {
+  var borrowed = 0;
+  systemData.forEach(function(p) {
+    var s = p.borrowStatus || '';
+    if (s === 'ยืมอยู่' || s === 'อยู่ระหว่างการส่งคืน') borrowed++;
+  });
+  document.getElementById('totalAssetsText').textContent   = 2085;
+  document.getElementById('borrowedCountText').textContent  = borrowed;
+  document.getElementById('availableCountText').textContent = 2085 - borrowed;
+}
+
+function _renderDashboardFromStats(levels) {
+  var LEVELS = [
+    { key:'รายชื่อนักเรียน ม.3', label:'ม.3', icon:'fas fa-graduation-cap', color:'#0d6efd' },
+    { key:'รายชื่อนักเรียน ม.4', label:'ม.4', icon:'fas fa-graduation-cap', color:'#6f42c1' },
+    { key:'รายชื่อนักเรียน ม.5', label:'ม.5', icon:'fas fa-graduation-cap', color:'#198754' },
+    { key:'รายชื่อนักเรียน ม.6', label:'ม.6', icon:'fas fa-graduation-cap', color:'#dc3545' },
+    { key:'รายชื่อครู',           label:'ครู',  icon:'fas fa-chalkboard-teacher', color:'#0dcaf0' }
+  ];
+  var html = '';
+  LEVELS.forEach(function(lv) {
+    var c = levels[lv.key] || 0;
+    html += '<div class="col-6 col-md-3">' +
+      '<div class="level-card" onclick="openLevel(\'' + escapeHtml(lv.key) + '\')" style="--lc:' + lv.color + ';">' +
+        '<div class="level-icon" style="color:' + lv.color + ';"><i class="' + lv.icon + '"></i></div>' +
+        '<div class="level-label">' + lv.label + '</div>' +
+        '<div class="level-count">' + c + ' คน</div>' +
+      '</div>' +
+    '</div>';
+  });
+  document.getElementById('dashboard-grid').innerHTML = html;
+}
+
+function renderDashboardGrid() {
+  var levels = {};
+  systemData.forEach(function(p) {
+    var src = p.source_sheet || '-';
+    if (!levels[src]) levels[src] = 0;
+    levels[src]++;
+  });
+  _renderDashboardFromStats(levels);
+}
+
+// ==========================================
+// ROOM PICKER — Step 2: เลือกห้อง
+// ==========================================
+
+function openLevel(level) {
+  currentLevel = level;
+  // ถ้าเป็นครู → ข้ามหน้าเลือกห้อง ไปที่ตารางโดยตรง
+  if (level === 'รายชื่อครู') {
+    openRoom(level, '');
+    return;
+  }
+  showView('view-room');
+  var lbl = document.getElementById('room-level-label');
+  if (lbl) lbl.textContent = level.replace('รายชื่อนักเรียน ', '');
+  renderRoomPicker(level);
+}
+
+function renderRoomPicker(level) {
+  var grid = document.getElementById('room-picker-grid');
+  if (!grid) return;
+
+  if (!_dataLoaded || !systemData.length) {
+    grid.innerHTML = '<div class="col-12 text-center py-5">' +
+      '<div class="spinner-border text-primary" role="status"></div>' +
+      '<div class="mt-2 text-muted">กำลังโหลดข้อมูล...</div></div>';
+    // รอ data แล้ว re-render
+    if (!_dataLoaded) {
+      var checkInterval = setInterval(function() {
+        if (_dataLoaded) {
+          clearInterval(checkInterval);
+          renderRoomPicker(level);
+        }
+      }, 300);
+    }
+    return;
+  }
+
+  // รวบรวมห้องและสถิติ
+  var roomStats = {};
+  systemData.forEach(function(p) {
+    if (p.source_sheet !== level) return;
+    var rm = String(p.room || '-');
+    if (!roomStats[rm]) roomStats[rm] = { total:0, borrowed:0, docPassed:0, notBorrowed:0, returned:0 };
+    roomStats[rm].total++;
+    var s = p.borrowStatus || '';
+    if (s === 'ยืมอยู่' || s === 'อยู่ระหว่างการส่งคืน') roomStats[rm].borrowed++;
+    else if (s === 'คืนแล้ว') roomStats[rm].returned++;
+    else roomStats[rm].notBorrowed++;
+    if ((p.docStatus||'') === 'เอกสารผ่าน') roomStats[rm].docPassed++;
+  });
+
+  var rooms = Object.keys(roomStats).sort(function(a,b) {
+    return String(a).localeCompare(String(b), 'th', {numeric:true});
+  });
+
+  if (!rooms.length) {
+    grid.innerHTML = '<div class="col-12 text-center py-5 text-muted"><i class="fas fa-inbox fa-2x mb-2 d-block"></i>ไม่พบข้อมูลห้องเรียน</div>';
+    return;
+  }
+
+  var html = '';
+  rooms.forEach(function(rm) {
+    var s = roomStats[rm];
+    var pct = s.total ? Math.round((s.borrowed / s.total) * 100) : 0;
+    var retPct = s.total ? Math.round(((s.borrowed + s.returned) / s.total) * 100) : 0;
+
+    // สี progress bar ตาม % ยืม
+    var barColor = pct >= 80 ? '#198754' : pct >= 50 ? '#ffc107' : '#dee2e6';
+
+    html +=
+      '<div class="col-6 col-md-4 col-lg-3">' +
+        '<div class="room-card" onclick="openRoom(\'' + escapeHtml(level) + '\',\'' + escapeHtml(rm) + '\')">' +
+          '<div class="room-card-header">' +
+            '<div class="room-card-number">ห้อง ' + escapeHtml(rm) + '</div>' +
+            '<div class="room-card-total">' + s.total + ' คน</div>' +
+          '</div>' +
+          '<div class="room-card-progress">' +
+            '<div class="room-card-progress-bar" style="width:' + pct + '%;background:' + barColor + ';"></div>' +
+          '</div>' +
+          '<div class="room-card-stats">' +
+            '<div class="rcs-item rcs-borrow">' +
+              '<i class="fas fa-tablet-alt"></i>' +
+              '<span>' + s.borrowed + '</span>' +
+              '<small>ยืม</small>' +
+            '</div>' +
+            '<div class="rcs-item rcs-notborrow">' +
+              '<i class="fas fa-clock"></i>' +
+              '<span>' + s.notBorrowed + '</span>' +
+              '<small>ยังไม่ยืม</small>' +
+            '</div>' +
+            '<div class="rcs-item rcs-doc">' +
+              '<i class="fas fa-file-check"></i>' +
+              '<span>' + s.docPassed + '</span>' +
+              '<small>เอกสารผ่าน</small>' +
+            '</div>' +
+          '</div>' +
+          '<div class="room-card-pct">' + pct + '% ยืมแล้ว</div>' +
+        '</div>' +
+      '</div>';
+  });
+
+  grid.innerHTML = html;
+}
+
+// ==========================================
+// TABLE VIEW — Step 3: รายชื่อ
+// ==========================================
+
+function openRoom(level, room) {
+  currentLevel = level;
+  currentRoom  = room;
+
+  // อัป breadcrumb
+  var bLevel = document.getElementById('breadcrumb-level-text');
+  var bRoom  = document.getElementById('breadcrumb-room-text');
+  var bSep   = document.getElementById('breadcrumb-room-sep');
+  var bLvlBtn = document.getElementById('breadcrumb-level-btn');
+
+  var levelShort = level.replace('รายชื่อนักเรียน ', '');
+  if (bLevel) bLevel.textContent = levelShort;
+  if (bRoom)  bRoom.textContent  = room ? 'ห้อง ' + room : 'ทั้งหมด';
+  if (bSep)   bSep.style.display = room ? '' : 'none';
+
+  // Title
+  var t = document.getElementById('table-title');
+  var b = document.getElementById('table-badge');
+  if (t) t.textContent = level === 'รายชื่อครู' ? 'รายชื่อครู' : levelShort + (room ? ' ห้อง ' + room : '');
+  if (b) b.textContent = level === 'รายชื่อครู' ? 'บุคลากร' : (room ? 'ห้อง ' + room : 'ทุกห้อง');
+
+  // ซ่อน breadcrumb ปุ่ม level ถ้าเป็นครู
+  if (bLvlBtn) bLvlBtn.style.display = (level === 'รายชื่อครู') ? 'none' : '';
+
+  showView('view-table');
+
+  // Reset filters
+  var sf = document.getElementById('statusFilter');
+  var df = document.getElementById('docFilter');
+  if (sf) sf.value = '';
+  if (df) df.value = '';
+  _tableSearchQuery = '';
+  var si = document.getElementById('tableSearchInput');
+  if (si) si.value = '';
+
+  if (_dataLoaded && systemData.length) {
+    applyTableFilters();
+  } else {
+    // แสดง skeleton ก่อน
+    var container = document.getElementById('table-list-container');
+    if (container) container.innerHTML = _skeletonHTML();
+    _loadSystemDataWithRetry(0, function() {
+      applyTableFilters();
+    }, function(err) {
+      showError(err);
+    });
+  }
+}
+
+function _skeletonHTML() {
+  var html = '';
+  for (var i = 0; i < 6; i++) {
+    html += '<div class="skeleton-card"><div class="skeleton-line w-60"></div><div class="skeleton-line w-40 mt-1"></div><div class="skeleton-line w-80 mt-2"></div></div>';
+  }
+  return '<div class="skeleton-grid">' + html + '</div>';
+}
+
+function onTableSearch(val) {
+  clearTimeout(_tableSearchDebounce);
+  _tableSearchQuery = (val || '').trim().toLowerCase();
+  _tableSearchDebounce = setTimeout(applyTableFilters, 280);
+}
+
+function clearTableSearch() {
+  var inp = document.getElementById('tableSearchInput');
+  if (inp) inp.value = '';
+  _tableSearchQuery = '';
+  applyTableFilters();
+}
+
+function getFilteredTableRows(statusV, docV) {
+  if (statusV === undefined) statusV = (document.getElementById('statusFilter') || {}).value || '';
+  if (docV    === undefined) docV    = (document.getElementById('docFilter')    || {}).value || '';
+
+  var q = _tableSearchQuery;
+
+  var rows = systemData.filter(function(p) {
+    if ((p.source_sheet || '') !== currentLevel) return false;
+    // กรองห้อง (จาก currentRoom ที่เลือกในหน้า room picker)
+    if (currentRoom && String(p.room || '') !== String(currentRoom)) return false;
+    if (statusV && String(p.borrowStatus || '') !== String(statusV)) return false;
+    if (docV    && String(p.docStatus || 'ยังไม่ส่ง') !== String(docV)) return false;
+    if (q) {
+      var hit = String(p.name||'').toLowerCase().indexOf(q) >= 0
+             || String(p.id||'').toLowerCase().indexOf(q) >= 0
+             || String(p.serial||'').toLowerCase().indexOf(q) >= 0;
+      if (!hit) return false;
+    }
+    return true;
+  });
+
+  rows.sort(function(a, b) {
+    return String(a.no||'').localeCompare(String(b.no||''), 'th', {numeric:true})
+        || String(a.name||'').localeCompare(String(b.name||''), 'th');
+  });
+
+  return rows;
+}
+
+function applyTableFilters() {
+  var statusV = (document.getElementById('statusFilter') || {}).value || '';
+  var docV    = (document.getElementById('docFilter')    || {}).value || '';
+  var rows = getFilteredTableRows(statusV, docV);
+  var countEl = document.getElementById('filteredCountText');
+  if (countEl) countEl.textContent = rows.length;
+  _renderMiniStats(rows);
+  renderTable(rows);
+  // อัปเดต count อีกครั้งหลัง requestAnimationFrame เสร็จ (กัน race condition)
+  requestAnimationFrame(function() {
+    if (countEl) countEl.textContent = rows.length;
+  });
+}
+
+// ─── mini stat cards ──────────────────────────────────────────
+function _renderMiniStats(rows) {
+  var b=0, nb=0, ret=0, pd=0, returning=0, repair=0;
+  rows.forEach(function(p){
+    var s = p.borrowStatus || '';
+    if (s === 'ยืมอยู่') b++;
+    else if (s === 'อยู่ระหว่างการส่งคืน') { b++; returning++; }
+    else if (s === 'ยังไม่ยืม') nb++;
+    else if (s === 'คืนแล้ว') ret++;
+    else if (s === 'ส่งซ่อม' || s === 'สละสิทธิ์') repair++;
+    if ((p.docStatus||'')==='รอตรวจสอบ' || (p.returnDocStatus||'')==='รอตรวจสอบ') pd++;
+  });
+  var total = rows.length || 1;
+
+  var el = document.getElementById('table-mini-stats');
+  if (!el) return;
+
+  var cards = [
+    { icon:'fas fa-tablet-alt',   label:'ยืมอยู่',   val:b,          c:'#198754', bg:'#d1e7dd', br:'#198754' },
+    { icon:'fas fa-box-open',     label:'ยังไม่ยืม', val:nb,         c:'#495057', bg:'#e9ecef', br:'#adb5bd' },
+    { icon:'fas fa-check-circle', label:'คืนแล้ว',   val:ret,        c:'#0a58ca', bg:'#cfe2ff', br:'#0d6efd' },
+    { icon:'fas fa-file-circle-question', label:'รอเอกสาร', val:pd,  c:'#842029', bg:'#f8d7da', br:'#dc3545' }
+  ];
+
+  el.innerHTML = cards.map(function(c) {
+    var pct = Math.round((c.val / total) * 100);
+    return '<div class="col-3">' +
+      '<div class="mst-card" style="border-top:3px solid ' + c.br + ';background:' + c.bg + ';">' +
+        '<div class="mst-val" style="color:' + c.c + ';">' + c.val + '</div>' +
+        '<div class="mst-lbl" style="color:' + c.c + ';">' + c.label + '</div>' +
+        '<div class="mst-pct" style="color:' + c.c + ';">' + pct + '%</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// ─── ปุ่ม toggle expand ────────────────────────────────────────
+function _toggleCardExtra(cardId) {
+  var el      = document.getElementById('extra_' + cardId);
+  var chevron = document.getElementById('chev_' + cardId);
+  var label   = document.getElementById('elbl_' + cardId);
+  if (!el) return;
+  var isOpen = el.style.display === 'block';
+  el.style.display = isOpen ? 'none' : 'block';
+  if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+  if (label)   label.textContent = isOpen ? 'รายละเอียด' : 'ซ่อน';
+}
+
+// ─── Search highlight ─────────────────────────────────────────
+function _hlText(text, q) {
+  if (!q || !text) return text;
+  var lower = text.toLowerCase();
+  var qLower = q.toLowerCase();
+  var idx = lower.indexOf(qLower);
+  if (idx < 0) return text;
+  return text.substring(0, idx) +
+    '<mark>' + text.substring(idx, idx + q.length) + '</mark>' +
+    text.substring(idx + q.length);
+}
+
+// ─── Status config ────────────────────────────────────────────
+function _statusConf(status) {
+  var map = {
+    'ยืมอยู่':                  { border:'#28a745', bg:'#d4edda', color:'#1e7e34', icon:'✅' },
+    'อยู่ระหว่างการส่งคืน':     { border:'#ffc107', bg:'#fff3cd', color:'#856404', icon:'🔄' },
+    'คืนแล้ว':                   { border:'#0d6efd', bg:'#cce5ff', color:'#004085', icon:'📦' },
+    'ส่งซ่อม':                   { border:'#dc3545', bg:'#f8d7da', color:'#721c24', icon:'🔧' },
+    'สละสิทธิ์':                 { border:'#6c757d', bg:'#e2e3e5', color:'#383d41', icon:'❌' },
+    'ยังไม่ยืม':                 { border:'#adb5bd', bg:'#f8f9fa', color:'#6c757d', icon:'⬜' }
+  };
+  return map[status] || { border:'#adb5bd', bg:'#f8f9fa', color:'#6c757d', icon:'⬜' };
+}
+
+// ─── Doc status config ────────────────────────────────────────
+function _docConf(status) {
+  var map = {
+    'เอกสารผ่าน':     { bg:'#d4edda', color:'#1e7e34', icon:'✅' },
+    'รอตรวจสอบ':      { bg:'#fff3cd', color:'#856404', icon:'⏳' },
+    'เอกสารไม่ผ่าน': { bg:'#f8d7da', color:'#721c24', icon:'❌' },
+    'ยังไม่ส่ง':      { bg:'#f8f9fa', color:'#adb5bd', icon:'📋' }
+  };
+  return map[status] || { bg:'#f8f9fa', color:'#adb5bd', icon:'📋' };
+}
+
+// ─── renderTable — ใหม่: แสดงข้อมูลชัดเจนทุก field ─────────────
+var _renderTableRAF = null;
+function renderTable(rows) {
+  var container = document.getElementById('table-list-container');
+  if (!container) return;
+
+  if (!rows.length) {
+    container.innerHTML =
+      '<div class="empty-state">' +
+        '<div class="empty-state-icon">🔍</div>' +
+        '<div class="empty-state-title">ไม่พบรายการ</div>' +
+        '<div class="empty-state-sub">ลองปรับตัวกรองหรือล้างการค้นหา</div>' +
+      '</div>';
+    return;
+  }
+
+  var q = _tableSearchQuery || '';
+
+  if (_renderTableRAF) cancelAnimationFrame(_renderTableRAF);
+  _renderTableRAF = requestAnimationFrame(function() {
+
+    var html = '<div class="sc-grid">';
+
+    rows.forEach(function(r, idx) {
+      var bs  = r.borrowStatus    || 'ยังไม่ยืม';
+      var ds  = r.docStatus       || 'ยังไม่ส่ง';
+      var rds = r.returnDocStatus || 'ยังไม่ส่ง';
+      var sn  = (r.serial && r.serial !== '-') ? r.serial : '';
+
+      var sc  = _statusConf(bs);
+      var dsc = _docConf(ds);
+      var rsc = _docConf(rds);
+
+      var dName   = _hlText(escapeHtml(r.name || ''), q);
+      var dId     = _hlText(escapeHtml(String(r.id || '')), q);
+      var dSerial = sn ? _hlText(escapeHtml(sn), q) : '';
+
+      var hasBorrowDoc = !!(r.files && r.files.agreement) || !!(r.docUrl);
+      var hasReturnDoc = !!(r.returnDocUrl);
+
+      // ── Doc links ──
+      var docLinksHtml = '';
+      if (hasBorrowDoc) {
+        var bUrl = (r.files && r.files.agreement) ? r.files.agreement : (r.docUrl || '');
+        docLinksHtml += '<a href="' + escapeHtml(bUrl) + '" target="_blank" class="doc-pill doc-pill-borrow">' +
+          '<i class="fas fa-file-pdf"></i> ดูเอกสารยืม</a>';
+      }
+      if (hasReturnDoc) {
+        docLinksHtml += '<a href="' + escapeHtml(r.returnDocUrl) + '" target="_blank" class="doc-pill doc-pill-return">' +
+          '<i class="fas fa-file-pdf"></i> ดูเอกสารคืน</a>';
+      }
+
+      html +=
+        '<div class="sc-card" style="--status-color:' + sc.border + ';animation-delay:' + Math.min(idx * 0.03, 0.3) + 's">' +
+
+          // ── STATUS STRIPE + Name ──
+          '<div class="sc-top" style="background:' + sc.bg + ';border-bottom:2px solid ' + sc.border + ';">' +
+            '<div class="sc-status-badge" style="background:' + sc.border + ';">' +
+              sc.icon + ' ' + escapeHtml(bs) +
+            '</div>' +
+            '<div class="sc-name">' + dName + '</div>' +
+            '<div class="sc-meta">' +
+              '<span class="sc-id"><i class="fas fa-id-card"></i> ' + dId + '</span>' +
+              (r.room ? '<span class="sc-room"><i class="fas fa-door-open"></i> ห้อง ' + escapeHtml(r.room) + '</span>' : '') +
+            '</div>' +
+          '</div>' +
+
+          // ── BODY ──
+          '<div class="sc-body">' +
+
+            // Serial
+            '<div class="sc-field">' +
+              '<span class="sc-field-label"><i class="fas fa-barcode"></i> Serial</span>' +
+              '<span class="sc-field-val sc-serial">' + (dSerial || '<span class="text-muted">—</span>') + '</span>' +
+            '</div>' +
+
+            // เอกสารยืม
+            '<div class="sc-field">' +
+              '<span class="sc-field-label"><i class="fas fa-file-alt"></i> เอกสารยืม</span>' +
+              '<span class="sc-doc-badge" style="background:' + dsc.bg + ';color:' + dsc.color + ';">' +
+                dsc.icon + ' ' + escapeHtml(ds) +
+              '</span>' +
+            '</div>' +
+
+            // เอกสารคืน
+            '<div class="sc-field">' +
+              '<span class="sc-field-label"><i class="fas fa-undo"></i> เอกสารคืน</span>' +
+              '<span class="sc-doc-badge" style="background:' + rsc.bg + ';color:' + rsc.color + ';">' +
+                rsc.icon + ' ' + escapeHtml(rds) +
+              '</span>' +
+            '</div>' +
+
+            // ปุ่ม PDF ถ้ามี
+            (docLinksHtml ? '<div class="sc-doc-links">' + docLinksHtml + '</div>' : '') +
+
+          '</div>' +
+
+          // ── FOOTER: ปุ่มอัปโหลด ──
+          '<div class="sc-footer">' +
+            '<button class="sc-upload-btn" onclick="openActionModal(\'' + escapeHtml(String(r.id)) + '\',\'' + escapeHtml(r.source_sheet||'') + '\')">' +
+              '<i class="fas fa-cloud-upload-alt"></i> อัปโหลดเอกสาร' +
+            '</button>' +
+          '</div>' +
+
+        '</div>';
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+  });
+}
+
+// ==========================================
+// UPLOAD DOCUMENT MODAL
+// ==========================================
+
+function showUploadDocModal(type) {
+  var form = document.getElementById('uploadDocForm');
+  if (form) form.reset();
+  var ptStudent = document.getElementById('ud_pt_student');
+  if (ptStudent) ptStudent.checked = true;
+  var lvl = document.getElementById('ud_levelSelect');
+  if (lvl) lvl.value = '';
+  var roomSec = document.getElementById('ud_roomSection');
+  var roomSel = document.getElementById('ud_roomSelect');
+  if (roomSec) roomSec.style.display = 'none';
+  if (roomSel) roomSel.innerHTML = '<option value="">— ทุกห้อง —</option>';
+  var lvlSec = document.getElementById('ud_levelSection');
+  if (lvlSec) lvlSec.style.display = '';
+  var search = document.getElementById('ud_searchName');
+  if (search) search.value = '';
+  if (type) {
+    var rb = document.getElementById('ud_type_borrow');
+    var rr = document.getElementById('ud_type_return');
+    if (rb) rb.checked = type === 'borrow';
+    if (rr) rr.checked = type === 'return';
+  }
+  $('#uploadDocModal').modal('show');
+  if (_dataLoaded && systemData.length) {
+    uploadDocPersonList = systemData;
+    filterUploadPersonList();
+  } else {
+    document.getElementById('ud_personSelect').innerHTML = '<option value="">— กำลังโหลดรายชื่อ... —</option>';
+    _loadSystemDataWithRetry(0, function() {
+      uploadDocPersonList = systemData;
+      filterUploadPersonList();
+    }, function(err) {
+      document.getElementById('ud_personSelect').innerHTML = '<option value="">— โหลดไม่สำเร็จ —</option>';
+      showError(err);
+    });
+  }
+}
+
+function onUploadPersonTypeChange() {
+  var isStudent = document.getElementById('ud_pt_student').checked;
+  var lvlSec = document.getElementById('ud_levelSection');
+  var roomSec = document.getElementById('ud_roomSection');
+  if (lvlSec) lvlSec.style.display = isStudent ? '' : 'none';
+  if (roomSec) roomSec.style.display = 'none';
+  var lvl = document.getElementById('ud_levelSelect');
+  if (lvl) lvl.value = '';
+  var roomSel = document.getElementById('ud_roomSelect');
+  if (roomSel) roomSel.innerHTML = '<option value="">— ทุกห้อง —</option>';
+  var search = document.getElementById('ud_searchName');
+  if (search) search.value = '';
+  filterUploadPersonList();
+}
+
+function onUploadLevelChange() {
+  var lvl = (document.getElementById('ud_levelSelect') || {}).value || '';
+  var roomSec = document.getElementById('ud_roomSection');
+  var roomSel = document.getElementById('ud_roomSelect');
+  if (!lvl) {
+    if (roomSec) roomSec.style.display = 'none';
+    if (roomSel) roomSel.innerHTML = '<option value="">— ทุกห้อง —</option>';
+    filterUploadPersonList();
+    return;
+  }
+  var rooms = [];
+  (uploadDocPersonList || []).forEach(function(p) {
+    if (p.source_sheet === lvl && p.room && rooms.indexOf(p.room) < 0) rooms.push(p.room);
+  });
+  rooms.sort(function(a,b) { return String(a).localeCompare(String(b),'th',{numeric:true}); });
+  if (roomSel) {
+    roomSel.innerHTML = '<option value="">— ทุกห้อง —</option>' +
+      rooms.map(function(r) { return '<option value="' + escapeHtml(r) + '">ห้อง ' + escapeHtml(r) + '</option>'; }).join('');
+  }
+  if (roomSec) roomSec.style.display = rooms.length ? '' : 'none';
+  filterUploadPersonList();
+}
+
+function filterUploadPersonList() {
+  var q         = ((document.getElementById('ud_searchName') || {}).value || '').toLowerCase().trim();
+  var isStudent = document.getElementById('ud_pt_student') ? document.getElementById('ud_pt_student').checked : true;
+  var lvl       = isStudent ? ((document.getElementById('ud_levelSelect') || {}).value || '') : '';
+  var room      = isStudent ? ((document.getElementById('ud_roomSelect') || {}).value || '') : '';
+  var sel       = document.getElementById('ud_personSelect');
+  if (!sel) return;
+
+  var filtered = (uploadDocPersonList || []).filter(function(p) {
+    if (isStudent  && p.type !== 'student') return false;
+    if (!isStudent && p.type !== 'teacher') return false;
+    if (lvl  && p.source_sheet !== lvl) return false;
+    if (room && String(p.room || '') !== String(room)) return false;
+    if (q && (p.name || '').toLowerCase().indexOf(q) < 0 && String(p.id || '').toLowerCase().indexOf(q) < 0) return false;
+    return true;
+  });
+
+  sel.innerHTML = '<option value="">— เลือกชื่อ (' + filtered.length + ' รายการ) —</option>' +
+    filtered.map(function(p) {
+      return '<option value="' + escapeHtml(p.id) + '|' + escapeHtml(p.source_sheet || '') + '">' +
+        escapeHtml(p.name) + (p.type === 'teacher' ? ' (ครู)' : ' ห้อง ' + escapeHtml(p.room || '')) + '</option>';
+    }).join('');
+}
+
+function handleUploadDocSubmit(form) {
+  var typeEl     = document.querySelector('input[name="ud_type"]:checked');
+  var uploadType = typeEl ? typeEl.value : 'borrow';
+  var selVal     = document.getElementById('ud_personSelect').value;
+  if (!selVal) { Swal.fire({ icon: 'warning', title: 'กรุณาเลือกชื่อ' }); return false; }
+  var parts = selVal.split('|');
+  var p = uploadDocPersonList.find(function (x) {
+    return String(x.id) === String(parts[0]) && (x.source_sheet || '') === (parts[1] || '');
+  });
+  if (!p) { Swal.fire({ icon: 'error', title: 'ไม่พบข้อมูล กรุณาเลือกใหม่' }); return false; }
+  var fileInput = form.querySelector('[name="ud_file"]');
+  if (!fileInput || !fileInput.files[0]) { Swal.fire({ icon: 'warning', title: 'กรุณาเลือกไฟล์ PDF' }); return false; }
+
+  var btn = document.querySelector('button[form="' + form.id + '"]');
+  var originalText = btn ? btn.innerHTML : 'อัปโหลด';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>กำลังอัปโหลดไฟล์...';
+  }
+
+  var obj = {
+    userId: p.id, userName: p.name, userType: p.type, userRoom: p.room, userSerial: p.serial,
+    source_sheet: p.source_sheet || '', uploadType: uploadType,
+    note: (form.querySelector('[name="ud_note"]') || {}).value || ''
+  };
+  readFileAsBase64(fileInput.files[0], function (b64) {
+    if (!b64) { Swal.fire({ icon: 'error', title: 'ไม่สามารถอ่านไฟล์ได้' }); return; }
+    obj.file_b64 = b64;
+    showGlobalLoading('กำลังอัปโหลดเอกสาร...');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        hideGlobalLoading();
+        if (res.success) {
+          showToast('อัปโหลดเรียบร้อย');
+          $('#uploadDocModal').modal('hide');
+          _localUpdatePerson(p.id, p.source_sheet, {
+            borrowStatus: uploadType === 'return' ? 'อยู่ระหว่างการส่งคืน' : 'ยืมอยู่',
+            docStatus:    uploadType === 'borrow' ? 'รอตรวจสอบ' : undefined
           });
         } else {
-          Swal.fire('เกิดข้อผิดพลาด', res.message, 'error');
+          Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: res.message });
         }
-      }).adminFixAssetNameBulk(selectedItems); 
+      })
+      .withFailureHandler(function (err) { hideGlobalLoading(); showError(err); })
+      .processUploadDoc(obj);
+  });
+  return false;
+}
+
+// ==========================================
+// LOGIN
+// ==========================================
+
+function showAdvisorLogin() { $('#advisorLoginModal').modal('show'); }
+function showAdminLogin()   { $('#adminLoginModal').modal('show'); }
+
+function loginAdmin(btnElement) {
+  var u = document.getElementById('adminUsernameInput').value.trim();
+  var p = document.getElementById('adminPasswordInput').value;
+  if (!u || !p) { Swal.fire({ icon: 'warning', title: 'กรุณากรอก Username และ Password' }); return; }
+
+  var btn = btnElement || document.querySelector('#adminLoginModal .btn-primary') || document.querySelector('#adminLoginModal button[onclick*="loginAdmin"]');
+  var originalText = 'เข้าสู่ระบบ';
+  if (btn) {
+    originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>กำลังตรวจสอบ...';
+  }
+
+  showGlobalLoading('กำลังตรวจสอบสิทธิ์...');
+  google.script.run
+    .withSuccessHandler(function (res) {
+      if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+      hideGlobalLoading();
+      if (res.success) {
+        currentUser = { role: 'admin', name: res.name || 'Admin' };
+        document.getElementById('adminPasswordInput').value = '';
+        $('#adminLoginModal').modal('hide');
+        showView('view-admin');
+        loadAdminView();
+      } else {
+        Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: res.message || 'Username หรือ Password ไม่ถูกต้อง' });
+      }
+    })
+    .withFailureHandler(function (err) {
+      if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+      hideGlobalLoading();
+      showError(err);
+    })
+    .verifyAdmin(u, p);
+}
+
+function loginAdvisor(btnElement) {
+  var u = document.getElementById('advUsernameInput').value.trim();
+  var p = document.getElementById('advPasswordInput').value;
+  if (!u || !p) { Swal.fire({ icon: 'warning', title: 'กรุณากรอก Username และ Password' }); return; }
+
+  var btn = btnElement || document.querySelector('#advisorLoginModal .btn-primary') || document.querySelector('#advisorLoginModal button[onclick*="loginAdvisor"]');
+  var originalText = 'เข้าสู่ระบบ';
+  if (btn) {
+    originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>กำลังตรวจสอบ...';
+  }
+
+  showGlobalLoading('กำลังตรวจสอบสิทธิ์...');
+  google.script.run
+    .withSuccessHandler(function (res) {
+      if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+      hideGlobalLoading();
+      if (res.success) {
+        currentUser = { role: 'advisor', name: res.name, level: res.level, room: res.room };
+        document.getElementById('advPasswordInput').value = '';
+        $('#advisorLoginModal').modal('hide');
+        showView('view-admin');
+        loadAdminView();
+      } else {
+        Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: res.message || 'Username หรือ Password ไม่ถูกต้อง' });
+      }
+    })
+    .withFailureHandler(function (err) {
+      if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+      hideGlobalLoading();
+      showError(err);
+    })
+    .verifyAdvisor(u, p);
+}
+
+function exitAdmin() { currentUser = null; goLanding(); }
+
+// ==========================================
+// ADMIN VIEW
+// ==========================================
+
+function loadAdminView() {
+  showGlobalLoading('กำลังโหลดรายชื่อทั้งหมด...');
+  // โหลด inventory count แบบ async โดยไม่รอ
+  google.script.run
+    .withSuccessHandler(function(count) {
+      var el = document.getElementById('stat-inventory');
+      if (el) el.textContent = count || 0;
+    })
+    .withFailureHandler(function(){})
+    .getInventoryAvailableCount();
+
+  _loadSystemDataWithRetry(0, function() {
+    try {
+      updateAdminUIForRole();
+      updateAdminStats();
+      _updateModeButtonCounts();
+      filterAdminTable();
+    } catch (e) {
+      console.error('loadAdminView error:', e);
+    } finally {
+      hideGlobalLoading();
     }
+  }, function(err) { hideGlobalLoading(); showError(err); });
+}
+
+function updateAdminUIForRole() {
+  var titleEl    = document.getElementById('admin-title-text');
+  var roleEl     = document.getElementById('adminRoleDisplay');
+  var filterBox  = document.getElementById('adminFilterBox');
+  var btnAddUser  = document.getElementById('btn-add-user');
+  var btnAudit    = document.getElementById('btn-audit-missing');
+  var btnRefresh  = document.getElementById('btn-refresh');
+  var btnExport   = document.getElementById('btn-export');
+  var btnReport   = document.getElementById('btn-report');
+  var btnActivity = document.getElementById('btn-activity');
+
+  if (currentUser && currentUser.role === 'advisor') {
+    if (titleEl) titleEl.textContent = 'ครูที่ปรึกษา';
+    if (roleEl) {
+      var rawLevel = String(currentUser.level || '').trim();
+      var levelNumMatch = rawLevel.match(/\d+/);
+      var levelNum = levelNumMatch ? levelNumMatch[0] : rawLevel;
+      var lvDisplay = levelNum ? 'ม.' + levelNum : (rawLevel || '-');
+      roleEl.innerHTML =
+        'สวัสดี <span class="fw-bold text-primary">' + escapeHtml(currentUser.name || 'คุณครู') + '</span>' +
+        ' &nbsp;|&nbsp; ดูแลห้อง: <span class="badge bg-primary">' + escapeHtml(lvDisplay) + '/' + escapeHtml(currentUser.room || '-') + '</span>';
+    }
+    if (filterBox)   filterBox.classList.add('d-none');
+    if (btnAudit)    btnAudit.style.display    = 'none';
+    if (btnRefresh)  btnRefresh.style.display   = 'none';
+    if (btnExport)   btnExport.style.display    = 'none';
+    if (btnReport)   btnReport.style.display    = 'none';
+    if (btnActivity) btnActivity.style.display  = 'none';
+
+    // ── ปุ่มเพิ่มนักเรียน: ใหญ่ + ชัดเจน สำหรับครูที่ปรึกษา ──
+    if (btnAddUser) {
+      btnAddUser.style.display = '';
+      btnAddUser.className = 'btn btn-success btn-sm rounded-pill fw-bold shadow-sm';
+      btnAddUser.style.minWidth = '130px';
+      btnAddUser.innerHTML = '<i class="fas fa-user-plus me-1"></i> เพิ่มนักเรียน';
+      btnAddUser.title = 'เพิ่มนักเรียนในห้องของฉัน';
+      btnAddUser.onclick = function() { openAdvisorAddStudentModal(); };
+    }
+  } else {
+    if (titleEl) titleEl.textContent = 'ผู้ดูแลระบบ';
+    if (roleEl) roleEl.innerHTML = 'กำลังใช้งานสิทธิ์: <span class="fw-bold text-danger">แอดมิน</span>';
+    if (filterBox)   filterBox.classList.remove('d-none');
+    if (btnActivity) btnActivity.style.display  = '';
+    // คืน btn-add-user กลับเป็น style เดิมสำหรับ Admin
+    if (btnAddUser) {
+      btnAddUser.className = 'btn btn-outline-success btn-sm rounded-pill';
+      btnAddUser.style.minWidth = '';
+      btnAddUser.innerHTML = '<i class="fas fa-plus"></i>';
+      btnAddUser.title = 'เพิ่มรายชื่อ';
+      btnAddUser.onclick = function() { openAddUserModal(); };
+    }
+    if (btnAudit)    btnAudit.style.display    = '';
+    if (btnRefresh)  btnRefresh.style.display   = '';
+    if (btnExport)   btnExport.style.display    = '';
+    if (btnReport)   btnReport.style.display    = '';
+  }
+}
+
+function updateAdminStats(dataToCount) {
+  var arr;
+  if (Array.isArray(dataToCount)) {
+    arr = dataToCount;
+  } else if (currentUser && currentUser.role === 'advisor') {
+    // ── advisor: นับเฉพาะห้องตัวเอง ──
+    var rawLevel = String(currentUser.level || '').trim();
+    if (rawLevel.indexOf('ม.') < 0) rawLevel = 'ม.' + rawLevel;
+    var allSheets = [];
+    systemData.forEach(function(r){ var s = r.source_sheet||''; if(s && allSheets.indexOf(s)<0) allSheets.push(s); });
+    var lvSheet = allSheets.find(function(l){ return l.indexOf('นักเรียน')>=0 && l.indexOf(rawLevel)>=0; }) || '';
+    var rmNorm  = normalizeRoomValue(String(currentUser.room || '').trim());
+    arr = systemData.filter(function(p){
+      if (lvSheet && (p.source_sheet||'').indexOf(lvSheet)<0) return false;
+      if (rmNorm  && normalizeRoomValue(p.room) !== rmNorm) return false;
+      return true;
+    });
+  } else {
+    arr = systemData;
+  }
+  var t = 0, b = 0, nb = 0, pd = 0, ret = 0, rep = 0;
+  arr.forEach(function (p) {
+    t++;
+    var s = p.borrowStatus || '';
+    if (s === 'ยืมอยู่' || s === 'อยู่ระหว่างการส่งคืน') b++;
+    else if (s === 'ยังไม่ยืม') nb++;
+    else if (s === 'คืนแล้ว') ret++;
+    else if (s === 'ส่งซ่อม' || s === 'สละสิทธิ์') rep++;
+    if ((p.docStatus || '') === 'รอตรวจสอบ' || (p.returnDocStatus || '') === 'รอตรวจสอบ') pd++;
+  });
+  var setEl = function(id, v) { var e = document.getElementById(id); if(e) e.textContent = v; };
+  setEl('stat-total', t); setEl('stat-borrowed', b); setEl('stat-notborrow', nb);
+  setEl('stat-pending', pd); setEl('stat-returned', ret); setEl('stat-repair', rep);
+}
+
+function _updateModeButtonCounts() {
+  var dataset = systemData;
+  if (currentUser && currentUser.role === 'advisor') {
+    var rawLevel = String(currentUser.level || '').trim();
+    var levelNumMatch = rawLevel.match(/\d+/);
+    var levelNum = levelNumMatch ? levelNumMatch[0] : '';
+    var allSheets = [];
+    systemData.forEach(function(r){ var s = r.source_sheet||''; if(s && allSheets.indexOf(s)<0) allSheets.push(s); });
+    var lvSheet = levelNum
+      ? (allSheets.find(function(l){ return l.indexOf('นักเรียน')>=0 && l.indexOf('ม.'+levelNum)>=0; }) || '')
+      : '';
+    var rmNorm = normalizeRoomValue(String(currentUser.room || '').trim());
+    dataset = systemData.filter(function(p){
+      if (lvSheet && (p.source_sheet||'').indexOf(lvSheet) < 0) return false;
+      if (rmNorm  && normalizeRoomValue(p.room) !== rmNorm) return false;
+      return true;
+    });
+  }
+
+  var returnCount = dataset.filter(function(p) {
+    return (p.borrowStatus || '').indexOf('อยู่ระหว่างการส่งคืน') >= 0;
+  }).length;
+  var docCount = dataset.filter(function(p) {
+    return (p.docStatus || '') === 'รอตรวจสอบ' || (p.returnDocStatus || '') === 'รอตรวจสอบ';
+  }).length;
+
+  var eReturnBadge = document.getElementById('modeReturnCount');
+  var eDocBadge    = document.getElementById('modeDocCount');
+  if (eReturnBadge) {
+    eReturnBadge.textContent = returnCount > 0 ? returnCount : '';
+    eReturnBadge.style.display = returnCount > 0 ? '' : 'none';
+  }
+  if (eDocBadge) {
+    eDocBadge.textContent = docCount > 0 ? docCount : '';
+    eDocBadge.style.display = docCount > 0 ? '' : 'none';
+  }
+}
+
+function setAdminMode(mode) {
+  adminMode = mode;
+  var activeId = { all: 'btnModeAll', 'return': 'btnModeReturn', doc: 'btnModeDoc' }[mode];
+  if (activeId) {
+    ['btnModeAll', 'btnModeReturn', 'btnModeDoc'].forEach(function(id) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.classList.remove('btn-primary', 'text-white');
+      btn.classList.add('btn-light', 'border');
+    });
+    var activeBtn = document.getElementById(activeId);
+    if (activeBtn) {
+      activeBtn.classList.remove('btn-light', 'border');
+      activeBtn.classList.add('btn-primary', 'text-white');
+    }
+  }
+  filterAdminTable();
+}
+
+function onAdminSearchInput(val) {
+  clearTimeout(_searchDebounce);
+  _adminSearchQuery = (val || '').trim().toLowerCase();
+  _searchDebounce   = setTimeout(filterAdminTable, 300);
+}
+
+function filterAdminTable() {
+  var lf = document.getElementById('adminLevelFilter');
+  var rf = document.getElementById('adminRoomFilter');
+  var lv = '', rm = '';
+  if (currentUser && currentUser.role === 'advisor') {
+    var levelKey = String(currentUser.level || '').trim();
+    if (levelKey && levelKey.indexOf('ม.') < 0) levelKey = 'ม.' + levelKey;
+    var allSheets = [];
+    systemData.forEach(function (r) { var s = r.source_sheet || ''; if (s && allSheets.indexOf(s) < 0) allSheets.push(s); });
+    lv = allSheets.find(function (l) { return l.indexOf('นักเรียน') >= 0 && (levelKey ? l.indexOf(levelKey) >= 0 : true); }) || '';
+    rm = String(currentUser.room || '').trim();
+  } else {
+    lv = lf ? lf.value : '';
+    rm = rf ? rf.value : '';
+  }
+  var tRoomNorm    = normalizeRoomValue(rm);
+  var statusFilter = (document.getElementById('adminStatusFilter') || {}).value || '';
+  var sortFilter   = (document.getElementById('adminSortFilter') || {}).value || 'name';
+  var q            = _adminSearchQuery;
+
+  var rows = systemData.filter(function (p) {
+    if (lv         && (p.source_sheet || '').indexOf(lv) < 0) return false;
+    if (tRoomNorm  && normalizeRoomValue(p.room) !== tRoomNorm) return false;
+    if (statusFilter && (p.borrowStatus || '') !== statusFilter) return false;
+    if (adminMode === 'return') return (p.borrowStatus || '').indexOf('อยู่ระหว่างการส่งคืน') >= 0;
+    if (adminMode === 'doc')    return (p.docStatus || '') === 'รอตรวจสอบ' || (p.returnDocStatus || '') === 'รอตรวจสอบ';
+    if (q) {
+      var nameMatch   = String(p.name   || '').toLowerCase().indexOf(q) >= 0;
+      var idMatch     = String(p.id     || '').toLowerCase().indexOf(q) >= 0;
+      var serialMatch = String(p.serial || '').toLowerCase().indexOf(q) >= 0;
+      var roomMatch   = String(p.room   || '').toLowerCase().indexOf(q) >= 0;
+      if (!nameMatch && !idMatch && !serialMatch && !roomMatch) return false;
+    }
+    return true;
+  });
+
+  rows.sort(function (a, b) {
+    if (sortFilter === 'id')     return String(a.id || '').localeCompare(String(b.id || ''));
+    if (sortFilter === 'room')   return String(a.room || '').localeCompare(String(b.room || ''));
+    if (sortFilter === 'status') return String(a.borrowStatus || '').localeCompare(String(b.borrowStatus || ''));
+    return String(a.name || '').localeCompare(String(b.name || ''), 'th');
+  });
+
+  if (currentUser && currentUser.role === 'advisor') updateAdminStats(rows);
+  renderAdminTable(rows, lv, rm);
+}
+
+function renderAdminTable(rows, preserveLevel, preserveRoom) {
+  // ── ทำลาย DataTables instance เดิมก่อนสร้างใหม่ (ป้องกัน re-init error) ──
+  try {
+    if (adminDataTableInstance) {
+      adminDataTableInstance.destroy();
+      adminDataTableInstance = null;
+    } else if ($.fn.DataTable.isDataTable('#adminTable')) {
+      $('#adminTable').DataTable().destroy();
+    }
+  } catch (e) {
+    adminDataTableInstance = null;
+  }
+
+  var levels = [], rooms = {};
+  systemData.forEach(function (r) {
+    var s = r.source_sheet || '';
+    if (s && levels.indexOf(s) < 0) levels.push(s);
+    if (s) { if (!rooms[s]) rooms[s] = []; if (rooms[s].indexOf(r.room || '-') < 0) rooms[s].push(r.room || '-'); }
+  });
+  var lf = document.getElementById('adminLevelFilter');
+  var rf = document.getElementById('adminRoomFilter');
+  if (lf) {
+    lf.innerHTML = '<option value="">ทุกระดับชั้น</option>' + levels.sort().map(function (l) {
+      return '<option value="' + escapeHtml(l) + '">' + escapeHtml(l.replace('รายชื่อนักเรียน ', '')) + '</option>';
+    }).join('');
+    if (preserveLevel && levels.indexOf(preserveLevel) >= 0) lf.value = preserveLevel;
+  }
+  if (rf) {
+    var rlist = (lf && lf.value && rooms[lf.value]) ? rooms[lf.value] : [];
+    rf.innerHTML = '<option value="">ทุกห้อง</option>' + rlist.sort().map(function (r) {
+      return '<option value="' + escapeHtml(r) + '">ห้อง ' + escapeHtml(r) + '</option>';
+    }).join('');
+    if (preserveRoom && rlist.indexOf(preserveRoom) >= 0) rf.value = preserveRoom;
+  }
+
+  var isAdvisor = currentUser && currentUser.role === 'advisor';
+  var isAdmin   = currentUser && currentUser.role === 'admin';
+  var tbody     = document.querySelector('#adminTable tbody');
+  if (!tbody) return; // ป้องกัน null pointer
+
+  tbody.innerHTML = '';
+  var frag = document.createDocumentFragment();
+  rows.forEach(function (r) {
+    var bs       = r.borrowStatus || 'ยังไม่ยืม';
+    var ds       = r.docStatus   || 'ยังไม่ส่ง';
+    var safeId   = escapeHtml(r.id);
+    var safeSheet = escapeHtml(r.source_sheet || '');
+    var safeName  = escapeHtml(r.name || '');
+    var safeRoom  = escapeHtml(r.room || '');
+    var safeSerial = escapeHtml(r.serial || '');
+    var safeType  = escapeHtml(r.type || 'student');
+
+    var action = '';
+    action += '<button class="btn btn-sm btn-outline-primary" onclick="openActionModal(\'' + safeId + '\',\'' + safeSheet + '\')" title="ดู/อัปโหลดเอกสาร">' +
+              '<i class="fas fa-file-alt"></i></button> ';
+
+    if (isAdmin) {
+      action += '<button class="btn btn-sm btn-outline-secondary" onclick="openAdminEdit(\'' + safeId + '\',\'' + safeSheet + '\')" title="แก้ไขข้อมูล">' +
+                '<i class="fas fa-pen"></i></button>';
+      if (bs.indexOf('อยู่ระหว่างการส่งคืน') >= 0) {
+        action += ' <button class="btn btn-sm btn-warning text-dark fw-bold" onclick="openAdminEdit(\'' + safeId + '\',\'' + safeSheet + '\')" title="อนุมัติคืน">' +
+                  '<i class="fas fa-check"></i> คืน</button>';
+      }
+    }
+
+    if (isAdvisor && ds === 'รอตรวจสอบ') {
+      action += '<button class="btn btn-sm btn-success fw-bold" onclick="advisorApproveDoc(\'' + safeId + '\',\'' + safeSheet + '\',\'' +
+        safeName + '\',\'' + safeRoom + '\',\'' + safeSerial + '\',\'' + safeType + '\')" title="อนุมัติเอกสาร">' +
+        '<i class="fas fa-check"></i> อนุมัติ</button>';
+      action += ' <button class="btn btn-sm btn-outline-danger fw-bold" onclick="advisorRejectDoc(\'' + safeId + '\',\'' + safeSheet + '\',\'' +
+        safeName + '\',\'' + safeRoom + '\',\'' + safeSerial + '\',\'' + safeType + '\')" title="แจ้งให้แก้ไขเอกสาร">' +
+        '<i class="fas fa-times"></i> แก้ไข</button>';
+    }
+    // ปุ่มแจ้งแก้ไขสำหรับ เอกสารผ่าน (ถ้าต้องการเปลี่ยนกลับ)
+    if (isAdvisor && (ds === 'เอกสารผ่าน' || ds === 'เอกสารไม่ผ่าน')) {
+      action += ' <button class="btn btn-sm btn-outline-warning text-dark btn-sm" onclick="advisorRejectDoc(\'' + safeId + '\',\'' + safeSheet + '\',\'' +
+        safeName + '\',\'' + safeRoom + '\',\'' + safeSerial + '\',\'' + safeType + '\')" title="แจ้งให้แก้ไขเอกสาร">' +
+        '<i class="fas fa-edit"></i></button>';
+    }
+    if (isAdvisor && bs === 'ยืมอยู่') {
+      action += ' <button class="btn btn-sm btn-outline-warning text-dark" onclick="openAdvisorReturnModal(\'' + safeId + '\')" title="ส่งคืน iPad">' +
+                '<i class="fas fa-undo"></i></button>';
+    }
+
+    // ✅ ครูที่ปรึกษา: ปุ่มแก้ไข / ลบรายชื่อนักเรียน
+    if (isAdvisor && r.type !== 'teacher') {
+      action += ' <button class="btn btn-sm btn-outline-secondary" onclick="openAdvisorStudentEditModal(\'' + safeId + '\',\'' + safeSheet + '\')" title="แก้ไขข้อมูลนักเรียน">' +
+                '<i class="fas fa-pen"></i></button>';
+      action += ' <button class="btn btn-sm btn-outline-danger" onclick="advisorConfirmDeleteStudent(\'' + safeId + '\',\'' + safeSheet + '\',\'' + safeName + '\')" title="ลบรายชื่อนักเรียน">' +
+                '<i class="fas fa-trash"></i></button>';
+    }
+
+    var rowClass = '';
+    if (bs.indexOf('อยู่ระหว่างการส่งคืน') >= 0) rowClass = 'table-warning';
+    else if (ds === 'รอตรวจสอบ') rowClass = 'table-info';
+
+    var serialShort = r.serial && r.serial !== '-'
+      ? '<code class="serial-code" onclick="copySerial(\'' + escapeHtml(r.serial) + '\')" title="คลิกเพื่อ copy">' + escapeHtml(r.serial) + '</code>'
+      : '<span class="text-muted">-</span>';
+
+    var tr = document.createElement('tr');
+    if (rowClass) tr.className = rowClass;
+    tr.innerHTML =
+      '<td class="text-muted small">' + escapeHtml(r.id) + '</td>' +
+      '<td><span class="fw-bold">' + escapeHtml(r.name) + '</span>' +
+        (r.room ? '<br><small class="text-muted">ห้อง ' + escapeHtml(r.room) + '</small>' : '') + '</td>' +
+      '<td>' + serialShort + '</td>' +
+      '<td><span class="badge bg-' + getBorrowBadgeClass(bs) + '">' + escapeHtml(bs) + '</span></td>' +
+      '<td><span class="badge bg-' + getDocBadgeClass(ds) + '">' + escapeHtml(ds) + '</span></td>' +
+      '<td class="text-nowrap">' + action + '</td>';
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+
+  var badge   = document.getElementById('adminTableBadge');
+  if (badge)   badge.textContent = rows.length + ' รายการ';
+  var countEl = document.getElementById('adminFilteredCount');
+  if (countEl) countEl.textContent = rows.length;
+
+  adminDataTableInstance = $('#adminTable').DataTable({
+    pageLength: 25,
+    lengthMenu: [[25, 50, 100, 200, -1], [25, 50, 100, 200, "ทั้งหมด"]],
+    order: [],
+    searching: false,
+    deferRender: true,
+    language: { url: '//cdn.datatables.net/plug-ins/1.13.4/i18n/th.json' }
   });
 }
-  function confirmMatch(oldAssetName, serial, selectId) {
-    let correctName = $(`#${selectId}`).val();
-    if(!correctName) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกรายชื่อที่ถูกต้องจากรายการ', 'warning');
 
-    Swal.fire({
-      title: 'ยืนยันการแก้ไข?',
-      html: `ระบบจะทำการแก้ไขชื่อใน <b>"รายงานทะเบียนทรัพย์สิน"</b><br>
-             จาก: <span class="text-danger">${oldAssetName}</span><br>
-             เป็น: <span class="text-success fw-bold">${correctName}</span>`,
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#0d6efd',
-      confirmButtonText: 'ยืนยันการแก้ไข',
-      cancelButtonText: 'ยกเลิก'
-    }).then((result) => {
-      if (result.isConfirmed) {
-        Swal.fire({ title: 'กำลังบันทึก...', didOpen: () => Swal.showLoading() });
-        
-        let data = {
-          oldAssetName: oldAssetName,
-          serial: serial,
-          correctName: correctName
-        };
+// ==========================================
+// LOCAL STATE UPDATE
+// ==========================================
 
-        google.script.run.withSuccessHandler(res => {
-          if(res.success) {
-            Swal.fire({ icon: 'success', title: 'สำเร็จ', text: 'แก้ไขข้อมูลในทะเบียนทรัพย์สินแล้ว', timer: 1500, showConfirmButton: false });
-            openMissingAudit(); // โหลดตารางใหม่
-            loadSystemData();   // โหลดข้อมูลหลักใหม่
-          } else {
-            Swal.fire('เกิดข้อผิดพลาด', res.message, 'error');
-          }
-        }).adminFixAssetName(data);
-      }
-    });
-  }
-
-  // --- 6. EXPORT & MODALS ---
-  function openExportModal() { let lvl = $('#adminLevelFilter').val(); let rm = $('#adminRoomFilter').val(); let text = "แสดงตามหน้าจอปัจจุบัน"; if(lvl) text += ` (ชั้น ${lvl}`; if(lvl && rm) text += ` ห้อง ${rm})`; else if(lvl) text += ` ทุกห้อง)`; else text = "ทุกระดับชั้น (ยังไม่ได้กรอง)"; $('#exportFilterText').text(text); new bootstrap.Modal(document.getElementById('exportModal')).show(); }
-  function executeExport() { let scope = $('input[name="exportScope"]:checked').val(); let dataToExport = []; if (scope === 'all') { if(currentUserRole === 'advisor') { dataToExport = allData.filter(item => item.source_sheet.includes(currentAdvisorLevel) && String(item.room) === String(currentAdvisorRoom)); } else { dataToExport = allData; } } else { let lvl = $('#adminLevelFilter').val(); let rm = $('#adminRoomFilter').val(); dataToExport = allData.filter(item => { let itemLvl = item.source_sheet.replace('รายชื่อนักเรียน ', '').replace('รายชื่อ', ''); let matchLvl = (lvl === "") || (itemLvl === lvl); let matchRoom = (rm === "") || (String(item.room) === String(rm)); if(currentUserRole === 'advisor') { return matchLvl && matchRoom && item.source_sheet.includes(currentAdvisorLevel) && String(item.room) === String(currentAdvisorRoom); } return matchLvl && matchRoom; }); } if (dataToExport.length === 0) { return Swal.fire('ไม่พบข้อมูล', 'ไม่มีข้อมูลสำหรับการส่งออก', 'warning'); } let csvContent = "\uFEFF"; let headers = []; let keys = []; if($('#col_id').is(':checked')) { headers.push("รหัสประจำตัว"); keys.push("id"); } if($('#col_name').is(':checked')) { headers.push("ชื่อ-นามสกุล"); keys.push("name"); } if($('#col_level').is(':checked')) { headers.push("ระดับชั้น"); keys.push("level_mapped"); } if($('#col_room').is(':checked')) { headers.push("ห้อง"); keys.push("room"); } if($('#col_status').is(':checked')) { headers.push("สถานะเครื่อง"); keys.push("borrowStatus"); } if($('#col_doc').is(':checked')) { headers.push("สถานะเอกสาร"); keys.push("docStatus"); } if($('#col_serial').is(':checked')) { headers.push("Serial Number"); keys.push("serial"); } csvContent += headers.join(",") + "\n"; dataToExport.forEach(item => { let row = []; keys.forEach(k => { let val = ""; if (k === 'level_mapped') { val = item.source_sheet.replace('รายชื่อนักเรียน ', '').replace('รายชื่อ', ''); } else { val = item[k] || "-"; } val = String(val).replace(/,/g, " "); row.push(val); }); csvContent += row.join(",") + "\n"; }); let encodedUri = encodeURI(csvContent); let blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }); let link = document.createElement("a"); let url = URL.createObjectURL(blob); let filename = "iPad_Data_Export_" + new Date().toISOString().slice(0,10) + ".csv"; link.setAttribute("href", url); link.setAttribute("download", filename); link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link); bootstrap.Modal.getInstance(document.getElementById('exportModal')).hide(); Swal.fire({ icon: 'success', title: 'ดาวน์โหลดเสร็จสิ้น', timer: 1500, showConfirmButton: false }); }
-
-  function openAdvancedReport() {
-    let reportData = {};
-    allData.forEach(item => {
-      let lvl = item.source_sheet.replace('รายชื่อนักเรียน ', '').replace('รายชื่อ', '');
-      let rm = item.room || 'N/A';
-      if(currentUserRole === 'advisor') { if(!item.source_sheet.includes(currentAdvisorLevel) || String(item.room) !== String(currentAdvisorRoom)) return; }
-      if (!reportData[lvl]) reportData[lvl] = {};
-      if (!reportData[lvl][rm]) reportData[lvl][rm] = { total: 0, borrowSuccess: 0, docPass: 0, notBorrow: 0, returned: 0, fix: 0 };
-      let stats = reportData[lvl][rm];
-      stats.total++;
-      let s = item.borrowStatus;
-      if (['ยืมอยู่', 'คืนแล้ว', 'ส่งซ่อม'].some(x => s.includes(x))) stats.borrowSuccess++;
-      if (item.docStatus === 'เอกสารผ่าน') stats.docPass++;
-      if (s === 'ยังไม่ยืม') stats.notBorrow++; else if (s.includes('คืน')) stats.returned++; else if (s.includes('ซ่อม') || s.includes('สละ')) stats.fix++;
-    });
-    let html = '';
-    Object.keys(reportData).sort().forEach(lvl => {
-      html += `<tr class="table-dark"><td colspan="7" class="text-start ps-3 fw-bold">${lvl}</td></tr>`;
-      Object.keys(reportData[lvl]).sort((a,b) => parseInt(a)-parseInt(b)).forEach(rm => {
-        let r = reportData[lvl][rm];
-        let borrowPct = r.total > 0 ? Math.round((r.borrowSuccess / r.total) * 100) : 0;
-        let docPct = r.total > 0 ? Math.round((r.docPass / r.total) * 100) : 0;
-        let barColorBorrow = borrowPct < 50 ? 'bg-danger' : (borrowPct < 80 ? 'bg-warning' : 'bg-success');
-        let barColorDoc = docPct < 50 ? 'bg-danger' : (docPct < 80 ? 'bg-warning' : 'bg-success');
-        html += `<tr><td class="text-start ps-4 fw-bold">ห้อง ${rm}</td><td class="fw-bold">${r.total}</td><td class="align-middle"><div class="d-flex justify-content-between small mb-1"><span>${r.borrowSuccess} คน</span><span class="fw-bold">${borrowPct}%</span></div><div class="progress" style="height: 6px;"><div class="progress-bar ${barColorBorrow}" style="width: ${borrowPct}%"></div></div></td><td class="align-middle"><div class="d-flex justify-content-between small mb-1"><span>${r.docPass} คน</span><span class="fw-bold">${docPct}%</span></div><div class="progress" style="height: 6px;"><div class="progress-bar ${barColorDoc}" style="width: ${docPct}%"></div></div></td><td class="d-none d-md-table-cell text-muted small">${r.notBorrow}</td><td class="d-none d-md-table-cell text-primary small">${r.returned}</td><td class="d-none d-md-table-cell text-danger small">${r.fix}</td></tr>`;
-      });
-    });
-    $('#reportTableBody').html(html);
-    new bootstrap.Modal(document.getElementById('reportModal')).show();
-  }
-
-  function badgeBorrow(status) {
-    if (status === 'ยืมอยู่') return `<span class="badge bg-success text-white"><i class="fas fa-tablet-alt"></i> ยืมอยู่</span>`;
-    if (status === 'คืนแล้ว') return `<span class="badge bg-primary text-white"><i class="fas fa-inbox"></i> คืนแล้ว</span>`;
-    if (status === 'ส่งซ่อม') return `<span class="badge bg-warning text-dark"><i class="fas fa-tools"></i> ส่งซ่อม</span>`;
-    if (status === 'สละสิทธิ์') return `<span class="badge bg-danger text-white"><i class="fas fa-ban"></i> สละสิทธิ์</span>`;
-    return `<span class="badge bg-white text-secondary border border-secondary bg-opacity-10 fw-normal"><i class="far fa-circle"></i> ยังไม่ยืม</span>`;
-  }
-
-  function badgeDoc(status) {
-    if (status === 'เอกสารผ่าน') return `<span class="badge bg-success text-white"><i class="fas fa-check"></i> ผ่าน</span>`;
-    if (status === 'เอกสารไม่ผ่าน') return `<span class="badge bg-danger text-white"><i class="fas fa-times"></i> แก้ไข</span>`;
-    if (status === 'รอตรวจสอบ') return `<span class="badge bg-warning text-dark border border-warning"><i class="fas fa-clock"></i> รอตรวจ</span>`;
-    return `<span class="badge bg-light text-muted border fw-normal"><i class="fas fa-minus"></i> ยังไม่ส่ง</span>`;
-  }
-  // --- 7. LOGIN & ACTIONS ---
-  function showAdminLogin() { new bootstrap.Modal(document.getElementById('adminLoginModal')).show(); }
-  function showAdvisorLogin() { new bootstrap.Modal(document.getElementById('advisorLoginModal')).show(); }
-
-  function loginAdmin() {
-    const u = $('#adminUsernameInput').val(), p = $('#adminPasswordInput').val();
-    if(!u || !p) return Swal.fire('แจ้งเตือน', 'กรุณากรอก User/Pass', 'warning');
-    const btn = event.target; btn.disabled=true; btn.innerText='Checking...';
-    
-    google.script.run.withSuccessHandler(res => {
-      btn.disabled=false; btn.innerText='Login';
-      if(res.success) {
-        currentUserRole = 'admin'; 
-        bootstrap.Modal.getInstance(document.getElementById('adminLoginModal')).hide();
-        $('.landing-section, #view-dashboard, #view-table, #main-nav').addClass('hidden');
-        $('#view-admin').removeClass('hidden');
-        $('#adminUsernameInput').val(''); $('#adminPasswordInput').val('');
-        renderAdminDashboard();
-      } else Swal.fire('ล้มเหลว', res.message, 'error');
-    }).verifyAdmin(u, p);
-  }
-
-  function loginAdvisor() {
-    const u = $('#advUsernameInput').val(), p = $('#advPasswordInput').val();
-    if(!u || !p) return Swal.fire('แจ้งเตือน', 'กรุณากรอก User/Pass', 'warning');
-    const btn = event.target; btn.disabled=true; btn.innerText='Checking...';
-
-    google.script.run.withSuccessHandler(res => {
-       btn.disabled=false; btn.innerText='เข้าสู่ระบบ';
-       if(res.success) {
-         currentUserRole = 'advisor'; 
-         currentAdvisorName = res.name;
-         currentAdvisorLevel = res.level;
-         currentAdvisorRoom = res.room;
-         
-         bootstrap.Modal.getInstance(document.getElementById('advisorLoginModal')).hide();
-         $('.landing-section, #view-dashboard, #view-table, #main-nav').addClass('hidden');
-         $('#view-admin').removeClass('hidden');
-         $('#advUsernameInput').val(''); $('#advPasswordInput').val('');
-         
-         renderAdminDashboard();
-       } else Swal.fire('ล้มเหลว', res.message, 'error');
-    }).verifyAdvisor(u, p);
-  }
-
-  function exitAdmin() { 
-    currentUserRole = ''; 
-    $('#view-admin').addClass('hidden'); 
-    goLanding();
-  }
-
-  function openModal(rowStr) {
-    let row = JSON.parse(decodeURIComponent(rowStr));
-    $('#m_userId').val(row.id); $('#m_userName').val(row.name);
-    $('#m_userType').val(row.type); $('#m_userRoom').val(row.room); 
-    $('#m_userSerial_input').val(row.serial && row.serial !== '-' ? row.serial : '');
-    $('#m_displayName').text(row.name);
-    
-    $('#m_borrow_badge').html(badgeBorrow(row.borrowStatus));
-    $('#m_doc_badge').html(badgeDoc(row.docStatus));
-    $('select[name="statusSelect"]').val(row.borrowStatus);
-
-    if(row.type === 'student') $('#studentFields').show(); else $('#studentFields').hide();
-    
-    // Clear previous values
-    $('input[type="file"]').val(''); $('textarea').val('');
-
-    // --- NEW LOGIC: ตรวจสอบสถานะเอกสาร ---
-    // ถ้าสถานะเป็น "รอตรวจสอบ" ให้ปิดการแก้ไขทั้งหมด
-    if (row.docStatus === 'รอตรวจสอบ') {
-       // Disable inputs & submit button
-       $('#updateForm input, #updateForm select, #updateForm textarea').prop('disabled', true);
-       $('#btnSubmit').prop('disabled', true).html('<i class="fas fa-lock"></i> อยู่ระหว่างตรวจสอบ');
-    } else {
-       // Enable กลับคืน
-       $('#updateForm input, #updateForm select, #updateForm textarea').prop('disabled', false);
-       $('#btnSubmit').prop('disabled', false).html('บันทึก');
+function _localUpdatePerson(userId, sourceSheet, changes) {
+  if (!changes) return;
+  var idx = -1;
+  for (var i = 0; i < systemData.length; i++) {
+    if (String(systemData[i].id) === String(userId) && (systemData[i].source_sheet || '') === (sourceSheet || '')) {
+      idx = i; break;
     }
-
-    new bootstrap.Modal(document.getElementById('actionModal')).show();
   }
-
-  function handleFormSubmit(form) {
-    $('#btnSubmit').prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> บันทึก...');
-    google.script.run.withSuccessHandler(res => {
-      $('#btnSubmit').prop('disabled', false).html('บันทึก');
-      if(res.success) {
-          Swal.fire({ icon: 'success', title: 'บันทึกสำเร็จ', timer: 1500, showConfirmButton: false });
-          bootstrap.Modal.getInstance(document.getElementById('actionModal')).hide();
-          loadSystemData();
-      } else { 
-          Swal.fire('Error', res.message, 'error'); 
-      }
-    }).processForm(form);
-  }
-
-  function openAdminEdit(rowStr) {
-    let row = JSON.parse(decodeURIComponent(rowStr));
-    $('#adm_id').val(row.id); $('#adm_name').val(row.name); $('#adm_name_hidden').val(row.name);
-    $('#adm_type').val(row.type); $('#adm_room').val(row.room); $('#adm_serial').val(row.serial);
-    $('#adm_borrow_status').val(row.borrowStatus); $('#adm_doc_status').val(''); 
-    let fileHtml = '';
-    if (row.files && typeof row.files === 'object') {
-      if(row.files.agreement) fileHtml += `<a href="${row.files.agreement}" target="_blank" class="btn btn-sm btn-outline-primary mb-1 me-1"><i class="fas fa-file-contract"></i> สัญญา</a>`;
-      if(row.files.card_std) fileHtml += `<a href="${row.files.card_std}" target="_blank" class="btn btn-sm btn-outline-info mb-1 me-1"><i class="fas fa-id-card"></i> บัตร นร.</a>`;
-      if(row.files.card_parent) fileHtml += `<a href="${row.files.card_parent}" target="_blank" class="btn btn-sm btn-outline-info mb-1 me-1"><i class="fas fa-id-card"></i> บัตร ผปค.</a>`;
-      if(row.files.house) fileHtml += `<a href="${row.files.house}" target="_blank" class="btn btn-sm btn-outline-secondary mb-1 me-1"><i class="fas fa-home"></i> ทะเบียนบ้าน</a>`;
-    }
-    if(fileHtml === '') fileHtml = '<span class="text-muted small">ไม่มีเอกสารแนบในระบบ</span>';
-    $('#adm_file_list').html(fileHtml);
-    new bootstrap.Modal(document.getElementById('adminEditModal')).show();
-  }
-
-  function saveAdminData() {
-    const data = {
-      userId: $('#adm_id').val(), userName: $('#adm_name_hidden').val(),
-      userType: $('#adm_type').val(), userRoom: $('#adm_room').val(),
-      userSerial: $('#adm_serial').val(), 
-      borrowStatusSelect: $('#adm_borrow_status').val(),
-      docStatusSelect: $('#adm_doc_status').val(),
-      note: $('#adm_note').val(),
-      editorRole: currentUserRole,
-      editorName: currentAdvisorName
-    };
-    Swal.fire({ title: 'Saving...', didOpen: () => Swal.showLoading() });
-    google.script.run.withSuccessHandler(res => {
-      if(res.success) Swal.fire({ icon: 'success', title: 'บันทึกแล้ว', timer: 1500, showConfirmButton: false }).then(() => { bootstrap.Modal.getInstance(document.getElementById('adminEditModal')).hide(); loadSystemData(); });
-      else Swal.fire('Error', res.message, 'error');
-    }).adminUpdateData(data);
-  }
-
-  function openAddUserModal() {
-    $('#new_name').val(''); $('#new_id').val(''); $('#new_room').val('');
-    toggleNewUserFields(); new bootstrap.Modal(document.getElementById('adminAddUserModal')).show();
-  }
-  function toggleNewUserFields() {
-    let sheet = $('#new_targetSheet').val();
-    if(sheet === 'รายชื่อครู') $('#new_studentFields').hide(); else $('#new_studentFields').show();
-  }
-  function saveNewUser() {
-    const data = { targetSheet: $('#new_targetSheet').val(), name: $('#new_name').val(), id: $('#new_id').val(), room: $('#new_room').val() };
-    if(!data.name) return Swal.fire('แจ้งเตือน', 'กรุณากรอกชื่อ-นามสกุล', 'warning');
-    Swal.fire({ title: 'กำลังบันทึก...', didOpen: () => Swal.showLoading() });
-    google.script.run.withSuccessHandler(res => {
-      if(res.success) Swal.fire({ icon: 'success', title: 'เพิ่มรายชื่อแล้ว', timer: 1500, showConfirmButton: false }).then(() => { bootstrap.Modal.getInstance(document.getElementById('adminAddUserModal')).hide(); loadSystemData(); });
-      else Swal.fire('Error', res.message, 'error');
-    }).adminAddUser(data);
-  }
-
-  function confirmDeleteUser(rowStr) {
-    let row = JSON.parse(decodeURIComponent(rowStr));
-    if(currentUserRole === 'advisor') return Swal.fire('ไม่อนุญาต', 'ครูที่ปรึกษาไม่สามารถลบข้อมูลได้', 'error');
-
-    Swal.fire({ title: 'ยืนยันการลบ?', text: `ต้องการลบรายชื่อ "${row.name}" ใช่หรือไม่?`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', confirmButtonText: 'ลบข้อมูล' }).then((result) => {
-      if (result.isConfirmed) {
-        Swal.fire({ title: 'กำลังลบ...', didOpen: () => Swal.showLoading() });
-        const data = { id: row.id, name: row.name, source_sheet: row.source_sheet, editorRole: currentUserRole };
-        google.script.run.withSuccessHandler(res => {
-          if(res.success) Swal.fire({ icon: 'success', title: 'ลบเสร็จสิ้น', timer: 1500, showConfirmButton: false }).then(() => loadSystemData());
-          else Swal.fire('เกิดข้อผิดพลาด', res.message, 'error');
-        }).adminDeleteUser(data);
-      }
+  if (idx >= 0) {
+    Object.keys(changes).forEach(function(k) {
+      if (changes[k] !== undefined && changes[k] !== null) systemData[idx][k] = changes[k];
     });
+    updateAdminStats();
+    _updateModeButtonCounts();
+    filterAdminTable();
   }
-  
-  // --- EXPORT SYSTEM ---
-  function openExportModal() {
-    let lvl = $('#adminLevelFilter').val();
-    let rm = $('#adminRoomFilter').val();
-    let text = "แสดงตามหน้าจอปัจจุบัน";
-    if(lvl) text += ` (ชั้น ${lvl}`;
-    if(lvl && rm) text += ` ห้อง ${rm})`;
-    else if(lvl) text += ` ทุกห้อง)`;
-    else text = "ทุกระดับชั้น (ยังไม่ได้กรอง)";
-    
-    $('#exportFilterText').text(text);
-    new bootstrap.Modal(document.getElementById('exportModal')).show();
-  }
+}
 
-  function executeExport() {
-    let scope = $('input[name="exportScope"]:checked').val();
-    let dataToExport = [];
+function _localDeletePerson(userId, sourceSheet) {
+  systemData = systemData.filter(function(x) {
+    return !(String(x.id) === String(userId) && (x.source_sheet || '') === (sourceSheet || ''));
+  });
+  updateAdminStats();
+  _updateModeButtonCounts();
+  filterAdminTable();
+}
 
-    if (scope === 'all') {
-      if(currentUserRole === 'advisor') {
-         dataToExport = allData.filter(item => item.source_sheet.includes(currentAdvisorLevel) && String(item.room) === String(currentAdvisorRoom));
-      } else {
-         dataToExport = allData;
-      }
-    } else {
-      let lvl = $('#adminLevelFilter').val();
-      let rm = $('#adminRoomFilter').val();
-      dataToExport = allData.filter(item => {
-        let itemLvl = item.source_sheet.replace('รายชื่อนักเรียน ', '').replace('รายชื่อ', '');
-        let matchLvl = (lvl === "") || (itemLvl === lvl);
-        let matchRoom = (rm === "") || (String(item.room) === String(rm));
-        
-        if(currentUserRole === 'advisor') {
-           return matchLvl && matchRoom && item.source_sheet.includes(currentAdvisorLevel) && String(item.room) === String(currentAdvisorRoom);
-        }
-        return matchLvl && matchRoom;
-      });
-    }
+// ==========================================
+// ADVISOR APPROVE DOC
+// ==========================================
 
-    if (dataToExport.length === 0) {
-      return Swal.fire('ไม่พบข้อมูล', 'ไม่มีข้อมูลสำหรับการส่งออก', 'warning');
-    }
-
-    let csvContent = "\uFEFF"; 
-    let headers = [];
-    let keys = [];
-
-    if($('#col_id').is(':checked')) { headers.push("รหัสประจำตัว"); keys.push("id"); }
-    if($('#col_name').is(':checked')) { headers.push("ชื่อ-นามสกุล"); keys.push("name"); }
-    if($('#col_level').is(':checked')) { headers.push("ระดับชั้น"); keys.push("level_mapped"); } 
-    if($('#col_room').is(':checked')) { headers.push("ห้อง"); keys.push("room"); }
-    if($('#col_status').is(':checked')) { headers.push("สถานะเครื่อง"); keys.push("borrowStatus"); }
-    if($('#col_doc').is(':checked')) { headers.push("สถานะเอกสาร"); keys.push("docStatus"); }
-    if($('#col_serial').is(':checked')) { headers.push("Serial Number"); keys.push("serial"); }
-
-    csvContent += headers.join(",") + "\n";
-
-    dataToExport.forEach(item => {
-      let row = [];
-      keys.forEach(k => {
-        let val = "";
-        if (k === 'level_mapped') {
-           val = item.source_sheet.replace('รายชื่อนักเรียน ', '').replace('รายชื่อ', '');
-        } else {
-           val = item[k] || "-";
-        }
-        val = String(val).replace(/,/g, " "); 
-        row.push(val);
-      });
-      csvContent += row.join(",") + "\n";
-    });
-
-    let encodedUri = encodeURI(csvContent);
-    let blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    let link = document.createElement("a");
-    let url = URL.createObjectURL(blob);
-    let filename = "iPad_Data_Export_" + new Date().toISOString().slice(0,10) + ".csv";
-    
-    link.setAttribute("href", url);
-    link.setAttribute("download", filename);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    bootstrap.Modal.getInstance(document.getElementById('exportModal')).hide();
-    Swal.fire({ icon: 'success', title: 'ดาวน์โหลดเสร็จสิ้น', timer: 1500, showConfirmButton: false });
-  }
-
-  // --- REFRESH DATA SYSTEM ---
-  function refreshSystemData() {
-    Swal.fire({
-      title: 'กำลังดึงข้อมูลใหม่...',
-      text: 'ระบบกำลังอ่านข้อมูลจากชีต "ทะเบียนทรัพย์สิน" และ "รายชื่อ"',
-      allowOutsideClick: false,
-      didOpen: () => { Swal.showLoading(); }
-    });
-
-    loadSystemData(() => {
-      Swal.fire({
-        icon: 'success',
-        title: 'อัปเดตเรียบร้อย',
-        text: 'ข้อมูลล่าสุดถูกนำเข้าสู่ระบบแล้ว',
-        timer: 1500,
-        showConfirmButton: false
-      });
-    });
-  }
-
-// --- ฟังก์ชันดึงสถิติ Dashboard ---
-  function loadDashboardStats() {
+function advisorApproveDoc(id, sheet, userName, userRoom, userSerial, userType) {
+  Swal.fire({
+    title: 'ยืนยันอนุมัติเอกสาร?',
+    html: '<strong>' + escapeHtml(userName) + '</strong><br><small class="text-muted">ห้อง ' + escapeHtml(userRoom) + ' | Serial: ' + escapeHtml(userSerial) + '</small>',
+    icon: 'question', showCancelButton: true,
+    confirmButtonText: '<i class="fas fa-check me-1"></i>อนุมัติ',
+    cancelButtonText: 'ยกเลิก', confirmButtonColor: '#198754'
+  }).then(function (res) {
+    if (!res.isConfirmed) return;
+    showGlobalLoading('กำลังอนุมัติ...');
     google.script.run
-      .withSuccessHandler(function(stats) {
-        if(document.getElementById('totalAssetsText')) {
-          document.getElementById('totalAssetsText').innerText = stats.total;
-          document.getElementById('borrowedCountText').innerText = stats.borrowed;
-          document.getElementById('availableCountText').innerText = stats.available;
+      .withSuccessHandler(function (r) {
+        hideGlobalLoading();
+        if (r.success) {
+          showToast('อนุมัติเอกสารเรียบร้อย');
+          _localUpdatePerson(id, sheet, { docStatus: 'เอกสารผ่าน' });
+        } else {
+          Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: r.message });
         }
       })
-      .withFailureHandler(function(error) {
-        console.error("Error loading stats:", error);
+      .withFailureHandler(function (err) { hideGlobalLoading(); showError(err); })
+      .advisorApproveDoc({
+        userId: id, source_sheet: sheet, userName: userName || '',
+        userRoom: userRoom || '', userSerial: userSerial || '',
+        userType: userType || 'student', editorName: currentUser ? currentUser.name : ''
+      });
+  });
+}
+
+function advisorRejectDoc(id, sheet, userName, userRoom, userSerial, userType) {
+  Swal.fire({
+    title: 'แจ้งให้แก้ไขเอกสาร',
+    html: '<div class="text-start">' +
+      '<p class="mb-2">นักเรียน: <strong>' + escapeHtml(userName) + '</strong>' +
+      ' ห้อง <strong>' + escapeHtml(userRoom) + '</strong></p>' +
+      '<label class="form-label small fw-bold">เหตุผล / ข้อที่ต้องแก้ไข <span class="text-danger">*</span></label>' +
+      '<textarea id="swal_reject_note" class="swal2-textarea" rows="3" placeholder="เช่น ลายเซ็นไม่ครบ, เอกสารไม่ชัด, ต้องการสำเนาบัตรเพิ่ม..."></textarea>' +
+      '</div>',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonText: '<i class="fas fa-paper-plane me-1"></i>แจ้งแก้ไข',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#dc3545',
+    preConfirm: function() {
+      var note = document.getElementById('swal_reject_note').value.trim();
+      if (!note) { Swal.showValidationMessage('กรุณาระบุเหตุผล'); return false; }
+      return note;
+    }
+  }).then(function(res) {
+    if (!res.isConfirmed) return;
+    showGlobalLoading('กำลังบันทึก...');
+    google.script.run
+      .withSuccessHandler(function(r) {
+        hideGlobalLoading();
+        if (r.success) {
+          showToast('แจ้งแก้ไขเรียบร้อย', 'warning');
+          _localUpdatePerson(id, sheet, { docStatus: 'เอกสารไม่ผ่าน' });
+        } else {
+          Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: r.message });
+        }
       })
-      .getDashboardStats();
+      .withFailureHandler(function(err) { hideGlobalLoading(); showError(err); })
+      .advisorRejectDoc({
+        userId: id, source_sheet: sheet, userName: userName || '',
+        userRoom: userRoom || '', userSerial: userSerial || '',
+        userType: userType || 'student',
+        note: res.value,
+        editorName: currentUser ? currentUser.name : ''
+      });
+  });
+}
+
+// ==========================================
+// REFRESH
+// ==========================================
+
+function refreshSystemData() {
+  showGlobalLoading('กำลังอัปเดตและซิงค์ข้อมูล...');
+  google.script.run
+    .withSuccessHandler(function (data) {
+      systemData  = data || [];
+      _dataLoaded = true;
+      updateAdminUIForRole();
+      updateAdminStats();
+      _updateModeButtonCounts();
+      filterAdminTable();
+      hideGlobalLoading();
+      showToast('ซิงค์ข้อมูลเรียบร้อย');
+    })
+    .withFailureHandler(function (err) { hideGlobalLoading(); showError(err); })
+    .refreshAndSyncData();
+}
+
+// ==========================================
+// ACTION MODAL
+// ==========================================
+
+function updateSerialCounter(input) {
+  var val = input.value.replace(/\s/g, '');
+  input.value = val; // กรอง whitespace
+  var len = val.length;
+  var counter = document.getElementById('m_serial_counter');
+  var msg     = document.getElementById('m_serial_msg');
+  var hint    = document.getElementById('m_serial_hint');
+  if (counter) {
+    counter.textContent = len + '/10';
+    counter.className = 'input-group-text ' + (len === 10 ? 'bg-success text-white' : len > 0 ? 'bg-warning text-dark' : '');
   }
+  if (msg) {
+    if (len === 0) { msg.textContent = ''; msg.className = 'small mt-1'; }
+    else if (len < 10) { msg.textContent = '⚠️ ต้องการ ' + (10 - len) + ' ตัวอักษรอีก'; msg.className = 'small mt-1 text-warning'; }
+    else if (len === 10) { msg.textContent = '✅ Serial ครบ 10 ตัว'; msg.className = 'small mt-1 text-success'; }
+  }
+  if (hint) hint.style.display = len === 10 ? 'none' : '';
+}
+
+function openActionModal(id, sheet) {
+  var p = systemData.find(function (x) { return String(x.id) === String(id) && (x.source_sheet || '') === sheet; });
+  if (!p) { showError('ไม่พบข้อมูลผู้ใช้'); return; }
+  document.getElementById('m_userId').value        = p.id;
+  document.getElementById('m_userType').value      = p.type || 'student';
+  document.getElementById('m_userRoom').value      = p.room || '';
+  document.getElementById('m_userName').value      = p.name || '';
+  document.getElementById('m_displayName').textContent = p.name;
+  var serialVal = (p.serial && p.serial !== '-') ? p.serial : '';
+  var serialInput = document.getElementById('m_userSerial_input');
+  if (serialInput) {
+    serialInput.value = serialVal;
+    serialInput.dataset.origSerial = serialVal;
+    updateSerialCounter(serialInput); // อัปเดต counter ทันที
+  }
+  var bs = p.borrowStatus || 'ยังไม่ยืม';
+  var ds = p.docStatus   || 'ยังไม่ส่ง';
+  var bb = document.getElementById('m_borrow_badge');
+  var db = document.getElementById('m_doc_badge');
+  if (bb) { bb.textContent = bs; bb.className = 'badge bg-' + getBorrowBadgeClass(bs); }
+  if (db) { db.textContent = ds; db.className = 'badge bg-' + getDocBadgeClass(ds); }
+  var statusSel = document.querySelector('#updateForm [name="statusSelect"]');
+  if (statusSel) statusSel.value = bs;
+  var ssField = document.getElementById('m_sourceSheet');
+  if (ssField) ssField.value = p.source_sheet || '';
+  var links = [];
+  if ((p.files || {}).agreement) links.push('<a href="' + escapeHtml(p.files.agreement) + '" target="_blank" class="btn btn-sm btn-outline-primary me-1"><i class="fas fa-file-pdf me-1"></i>สัญญาการยืม</a>');
+  if (p.returnDocUrl) links.push('<a href="' + escapeHtml(p.returnDocUrl) + '" target="_blank" class="btn btn-sm btn-outline-warning"><i class="fas fa-file-pdf me-1"></i>หลักฐานการคืน</a>');
+  document.getElementById('m_doc_links').innerHTML = links.length ? links.join('') : '<span class="text-muted small"><i class="fas fa-info-circle me-1"></i>ยังไม่มีเอกสาร</span>';
+  var form = document.getElementById('updateForm');
+  if (form) {
+    form.querySelectorAll('input[type="file"]').forEach(function (fi) { fi.value = ''; });
+    var noteEl = form.querySelector('[name="note"]');
+    if (noteEl) noteEl.value = p.note || '';
+  }
+  $('#actionModal').modal('show');
+}
+
+function handleFormSubmit(form) {
+  var obj = {
+    userId:     form.querySelector('[name="userId"]').value,
+    userName:   form.querySelector('[name="userName"]').value,
+    userType:   form.querySelector('[name="userType"]').value,
+    userRoom:   form.querySelector('[name="userRoom"]').value,
+    userSerial: form.querySelector('[name="userSerial"]') ? form.querySelector('[name="userSerial"]').value.trim() : '',
+    statusSelect: form.querySelector('[name="statusSelect"]') ? form.querySelector('[name="statusSelect"]').value : '',
+    note:       form.querySelector('[name="note"]') ? form.querySelector('[name="note"]').value : '',
+    source_sheet: document.getElementById('m_sourceSheet') ? document.getElementById('m_sourceSheet').value : ''
+  };
+  var serialInput = document.getElementById('m_userSerial_input');
+  var origSerial  = serialInput ? (serialInput.dataset.origSerial || '') : '';
+  var serialChanged = obj.userSerial !== origSerial && obj.userSerial !== '';
+
+  // ── Validate serial ถ้ากรอกมา ──
+  if (obj.userSerial && obj.userSerial !== '-' && obj.userSerial.length !== 10) {
+    Swal.fire({ icon: 'warning', title: 'Serial ไม่ถูกต้อง', text: 'กรุณากรอก Serial ให้ครบ 10 ตัวอักษร (ปัจจุบัน: ' + obj.userSerial.length + ' ตัว)' });
+    return false;
+  }
+
+  var fa = form.querySelector('[name="file_agreement"]') ? form.querySelector('[name="file_agreement"]').files[0] : null;
+  var fr = form.querySelector('[name="file_return"]')    ? form.querySelector('[name="file_return"]').files[0]    : null;
+  if (!fa && !fr && !obj.note && !obj.statusSelect && !serialChanged) {
+    Swal.fire({ icon: 'info', title: 'ไม่มีข้อมูลที่เปลี่ยนแปลง', text: 'กรุณาอัปโหลดเอกสาร หรือกรอก Serial Number' });
+    return false;
+  }
+
+  var btn = document.querySelector('button[form="' + form.id + '"]');
+  var originalText = btn ? btn.innerHTML : 'บันทึกข้อมูล';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>กำลังประมวลผล...';
+  }
+
+  var filesToRead = [];
+  if (fa) filesToRead.push({ key: 'file_agreement_b64', file: fa });
+  if (fr) filesToRead.push({ key: 'file_return_b64', file: fr });
+  var readNext = function (idx) {
+    if (idx >= filesToRead.length) {
+      showGlobalLoading('กำลังอัปโหลดเอกสาร...');
+      google.script.run
+        .withSuccessHandler(function (res) {
+          hideGlobalLoading();
+          if (res.success) {
+            showToast('บันทึกเรียบร้อย');
+            $('#actionModal').modal('hide');
+            var changes = {};
+            if (fr) changes.borrowStatus = 'อยู่ระหว่างการส่งคืน';
+            else if (fa) { changes.borrowStatus = 'ยืมอยู่'; changes.docStatus = 'รอตรวจสอบ'; }
+            // ถ้าเพิ่ม Serial โดยไม่มีเอกสาร → ยืมอยู่
+            if (!fa && !fr && serialChanged) { changes.borrowStatus = 'ยืมอยู่'; }
+            if (obj.userSerial && obj.userSerial !== '-') changes.serial = obj.userSerial;
+            if (obj.note) changes.note = obj.note;
+            _localUpdatePerson(obj.userId, obj.source_sheet, changes);
+          } else {
+            Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: res.message });
+          }
+        })
+        .withFailureHandler(function (err) { hideGlobalLoading(); showError(err); })
+        .processForm(obj);
+      return;
+    }
+    readFileAsBase64(filesToRead[idx].file, function (b64) { if (b64) obj[filesToRead[idx].key] = b64; readNext(idx + 1); });
+  };
+  readNext(0);
+  return false;
+}
+
+// ==========================================
+// ADMIN EDIT MODAL
+// ==========================================
+
+function openAdminEdit(id, sheet) {
+  var p = systemData.find(function (x) { return String(x.id) === String(id) && (x.source_sheet || '') === sheet; });
+  if (!p) { showError('ไม่พบข้อมูล'); return; }
+
+  document.getElementById('adm_id').value          = p.id;
+  document.getElementById('adm_name').value        = p.name;
+  document.getElementById('adm_name_hidden').value = p.name;
+  document.getElementById('adm_type').value        = p.type || '';
+  document.getElementById('adm_room').value        = p.room || '';
+
+  var serialSelect = document.getElementById('adm_serial');
+  serialSelect.innerHTML = '<option value="">กำลังโหลดเครื่องว่าง...</option>';
+
+  google.script.run
+    .withSuccessHandler(function(availableSerials) {
+      var currentSerial = p.serial || '-';
+      var opts = '<option value="-">-- คืนแล้ว / ไม่มีเครื่อง (-) --</option>';
+      if (currentSerial !== '-' && availableSerials.indexOf(currentSerial) < 0) {
+        opts += '<option value="' + escapeHtml(currentSerial) + '" selected>เครื่องปัจจุบัน: ' + escapeHtml(currentSerial) + '</option>';
+      }
+      availableSerials.forEach(function(s) {
+        var isSelected = (s === currentSerial) ? 'selected' : '';
+        opts += '<option value="' + escapeHtml(s) + '" ' + isSelected + '>' + escapeHtml(s) + '</option>';
+      });
+      serialSelect.innerHTML = opts;
+    })
+    .getAvailableSerials();
+
+  document.getElementById('adm_borrow_status').value = p.borrowStatus || 'ยังไม่ยืม';
+  document.getElementById('adm_doc_status').value    = p.docStatus || '';
+  document.getElementById('adm_note').value          = p.note || '';
+
+  var files  = p.files || {};
+  var mkLink = function (url, label, cls) {
+    return url
+      ? '<a href="' + escapeHtml(url) + '" target="_blank" class="btn btn-sm btn-outline-' + cls + ' me-1 mb-1"><i class="fas fa-file-pdf me-1"></i>' + label + '</a>'
+      : '<span class="text-muted small">ไม่มีไฟล์</span>';
+  };
+
+  document.getElementById('adm_file_list').innerHTML        = mkLink(files.agreement, 'สัญญาการยืม', 'primary');
+  document.getElementById('adm_return_file_list').innerHTML = mkLink(p.returnDocUrl, 'หลักฐานการคืน', 'success');
+
+  $('#adminEditModal').modal('show');
+}
+
+function saveAdminData() {
+  var idVal  = document.getElementById('adm_id').value;
+  var person = systemData.find(function (x) { return String(x.id) === String(idVal); });
+  var data   = {
+    userId:           idVal,
+    userName:         document.getElementById('adm_name').value,
+    userType:         document.getElementById('adm_type').value,
+    userRoom:         document.getElementById('adm_room').value,
+    userSerial:       document.getElementById('adm_serial').value,
+    source_sheet:     person ? (person.source_sheet || '') : '',
+    borrowStatusSelect: document.getElementById('adm_borrow_status').value,
+    docStatusSelect:    document.getElementById('adm_doc_status').value,
+    note:             document.getElementById('adm_note').value,
+    editorRole:       currentUser ? currentUser.role  : '',
+    editorName:       currentUser ? (currentUser.name || '') : ''
+  };
+  showGlobalLoading('กำลังบันทึกข้อมูล...');
+  google.script.run
+    .withSuccessHandler(function (res) {
+      hideGlobalLoading();
+      if (res.success) {
+        showToast('บันทึกเรียบร้อย');
+        $('#adminEditModal').modal('hide');
+        _localUpdatePerson(data.userId, data.source_sheet, {
+          borrowStatus: data.borrowStatusSelect || undefined,
+          docStatus:    data.docStatusSelect    || undefined,
+          note:         data.note
+        });
+      } else {
+        Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: res.message });
+      }
+    })
+    .withFailureHandler(function (err) { hideGlobalLoading(); showError(err); })
+    .adminUpdateData(data);
+}
+
+// ==========================================
+// DELETE
+// ==========================================
+
+function confirmDeleteUser(id, sheet, name) {
+  Swal.fire({
+    title: 'ลบ ' + name + '?', text: 'การกระทำนี้ไม่สามารถย้อนกลับได้',
+    icon: 'warning', showCancelButton: true,
+    confirmButtonText: 'ลบ', cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#dc3545'
+  }).then(function(res) {
+    if (!res.isConfirmed) return;
+    showGlobalLoading('กำลังลบข้อมูล...');
+    google.script.run
+      .withSuccessHandler(function(r) {
+        hideGlobalLoading();
+        if (r.success) {
+          showToast('ลบข้อมูลเรียบร้อย', 'success');
+          $('#adminEditModal').modal('hide');
+          _localDeletePerson(id, sheet);
+        } else {
+          Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: r.message });
+        }
+      })
+      .withFailureHandler(function(err) { hideGlobalLoading(); showError(err); })
+      .adminDeleteUser({
+        id: id, name: name, source_sheet: sheet,
+        editorRole: currentUser ? currentUser.role : ''
+      });
+  });
+}
+
+// ==========================================
+// EXPORT
+// ==========================================
+
+function openExportModal() {
+  var filterText = 'ระดับ: ' + ((document.getElementById('adminLevelFilter') || {}).value || 'ทั้งหมด') +
+    ' | ห้อง: ' + ((document.getElementById('adminRoomFilter') || {}).value || 'ทั้งหมด');
+  var el = document.getElementById('exportFilterText');
+  if (el) el.textContent = filterText;
+  $('#exportModal').modal('show');
+}
+
+function executeExport() {
+  var scope = document.querySelector('input[name="exportScope"]:checked').value;
+  var opts = scope === 'filtered' ? {
+    scope: 'filtered',
+    levelFilter: (document.getElementById('adminLevelFilter') || {}).value || '',
+    roomFilter:  (document.getElementById('adminRoomFilter')  || {}).value || ''
+  } : { scope: 'all' };
+  showGlobalLoading('กำลังสร้างไฟล์...');
+  google.script.run
+    .withSuccessHandler(function (data) {
+      hideGlobalLoading();
+      var colDefs = [
+        { id: 'col_id',     key: 'id',           label: 'รหัส'         },
+        { id: 'col_name',   key: 'name',         label: 'ชื่อ-นามสกุล' },
+        { id: 'col_status', key: 'borrowStatus', label: 'สถานะเครื่อง' },
+        { id: 'col_doc',    key: 'docStatus',    label: 'สถานะเอกสาร'  },
+        { id: 'col_level',  key: 'source_sheet', label: 'ระดับชั้น'    },
+        { id: 'col_room',   key: 'room',         label: 'ห้อง'         },
+        { id: 'col_serial', key: 'serial',       label: 'Serial Number' },
+        { id: 'col_note',   key: 'note',         label: 'หมายเหตุ'     }
+      ].filter(function (c) { var el = document.getElementById(c.id); return el && el.checked; });
+      var csv = '\uFEFF' + colDefs.map(function (c) { return '"' + c.label + '"'; }).join(',') + '\n';
+      data.forEach(function (r) {
+        csv += colDefs.map(function (c) { return '"' + String(r[c.key] || '').replace(/"/g, '""') + '"'; }).join(',') + '\n';
+      });
+      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      var a    = document.createElement('a');
+      a.href   = URL.createObjectURL(blob);
+      a.download = 'iPad_Export_' + getTimestamp() + '.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+      $('#exportModal').modal('hide');
+      showToast('ดาวน์โหลดเรียบร้อย');
+    })
+    .withFailureHandler(function (err) { hideGlobalLoading(); showError(err); })
+    .getExportData(opts);
+}
+
+// ==========================================
+// REPORTS
+// ==========================================
+
+function openAdvancedReport() {
+  showGlobalLoading('กำลังสร้างรายงาน...');
+  google.script.run
+    .withSuccessHandler(function (rows) {
+      hideGlobalLoading();
+      var tbody = document.getElementById('reportTableBodyProgress');
+      if (tbody) {
+        tbody.innerHTML = rows.map(function (r) {
+          var borrowed = (r.borrowed || 0) + (r.returned || 0) + (r.repair || 0);
+          var pct      = r.total > 0 ? Math.round(borrowed / r.total * 100) : 0;
+          var docSub   = r.docSubmitted || 0;
+          var docPct   = r.total > 0 ? Math.round(docSub / r.total * 100) : 0;
+          var cls      = pct >= 80 ? 'text-success fw-bold' : pct >= 50 ? 'text-warning' : 'text-danger';
+          var docCls   = docPct >= 80 ? 'text-info fw-bold' : docPct >= 50 ? 'text-info' : 'text-secondary';
+          return '<tr>' +
+            '<td class="text-start fw-bold">' + escapeHtml(r.level.replace('รายชื่อนักเรียน ', '')) + ' / ห้อง ' + escapeHtml(r.room) + '</td>' +
+            '<td>' + r.total + '</td>' +
+            '<td class="' + cls + '">' + borrowed + ' <small>(' + pct + '%)</small></td>' +
+            '<td class="text-warning fw-bold">' + (r.docPassed || 0) + '</td>' +
+            '<td class="' + docCls + '">' + docSub + ' <small>(' + docPct + '%)</small></td>' +
+            '<td class="d-none d-md-table-cell text-muted">' + (r.notBorrowed || 0) + '</td>' +
+            '<td class="d-none d-md-table-cell text-primary">' + (r.returned || 0) + '</td>' +
+            '<td class="d-none d-md-table-cell text-danger">' + (r.repair || 0) + '</td>' +
+            '</tr>';
+        }).join('');
+      }
+      $('#reportModalProgress').modal('show');
+    })
+    .withFailureHandler(function (err) { hideGlobalLoading(); showError(err); })
+    .getReportData();
+}
+
+// ==========================================
+// AUDIT & MAPPING
+// ==========================================
+
+function openMissingAudit() {
+  auditOrphansData = [];
+  showGlobalLoading('กำลังตรวจสอบรายการตกหล่น...');
+  google.script.run
+    .withSuccessHandler(function (orphans) {
+      hideGlobalLoading();
+      auditOrphansData = orphans || [];
+      var tbody = document.getElementById('auditTableBodyMissing');
+      if (tbody) {
+        tbody.innerHTML = !auditOrphansData.length
+          ? '<tr><td colspan="4" class="text-center text-success py-4"><i class="fas fa-check-circle me-2 fs-4"></i>ข้อมูลครบถ้วน ไม่พบรายการตกหล่น</td></tr>'
+          : auditOrphansData.map(function (o) {
+              var s = (o.suggestions && o.suggestions[0]) || {};
+              return '<tr><td>' + escapeHtml(s.sheet || '-') + '</td><td>' + escapeHtml(s.room || '-') + '</td>' +
+                '<td class="fw-bold text-danger">' + escapeHtml(o.assetName || '-') + '</td>' +
+                '<td><span class="badge bg-secondary">' + escapeHtml(o.serial || '-') + '</span></td></tr>';
+            }).join('');
+      }
+      var countEl = document.getElementById('auditCountText');
+      if (countEl) countEl.textContent = auditOrphansData.length + ' รายการ';
+      $('#auditModalMissing').modal('show');
+    })
+    .withFailureHandler(function (err) { hideGlobalLoading(); showError(err); })
+    .getAssetAuditData();
+}
+
+function openMappingModalFromMissing() {
+  if (!auditOrphansData || !auditOrphansData.length) {
+    Swal.fire({ icon: 'info', title: 'ไม่มีรายการที่ต้องจับคู่' }); return;
+  }
+  var tbody = document.getElementById('auditTableBodyMapping');
+  tbody.innerHTML = auditOrphansData.map(function (o, idx) {
+    var opts = '<option value="">-- เลือกชื่อที่ถูกต้อง --</option>' +
+      (o.suggestions || []).map(function (s, sidx) {
+        return '<option value="' + sidx + '">' + escapeHtml(s.name) + ' (' + escapeHtml(s.sheet || '') + ', ห้อง ' + escapeHtml(s.room || '') + ')</option>';
+      }).join('');
+    return '<tr>' +
+      '<td class="text-center"><input type="checkbox" class="form-check-input map-check" data-idx="' + idx + '" checked></td>' +
+      '<td class="fw-bold text-danger">' + escapeHtml(o.assetName || '-') + '</td>' +
+      '<td><select class="form-select form-select-sm map-select" data-idx="' + idx + '">' + opts + '</select></td>' +
+      '<td class="small text-muted">' + escapeHtml(o.serial || '-') + '</td>' +
+      '<td class="text-center"><span class="badge bg-warning text-dark">รอจับคู่</span></td></tr>';
+  }).join('');
+  document.getElementById('mappingCountText').textContent = auditOrphansData.length + ' รายการ';
+  $('#auditModalMissing').modal('hide');
+  $('#auditModalMapping').modal('show');
+}
+
+function saveMappingSelections() {
+  var updates = [];
+  document.querySelectorAll('.map-check:checked').forEach(function (cb) {
+    var idx     = parseInt(cb.getAttribute('data-idx'), 10);
+    var sel     = document.querySelector('.map-select[data-idx="' + idx + '"]');
+    var suggIdx = sel ? parseInt(sel.value, 10) : NaN;
+    var o       = auditOrphansData[idx];
+    if (!o || isNaN(suggIdx) || suggIdx < 0) return;
+    var s = o.suggestions && o.suggestions[suggIdx];
+    if (s && s.name) updates.push({ oldAssetName: o.assetName, correctName: s.name, serial: o.serial });
+  });
+  if (!updates.length) { Swal.fire({ icon: 'warning', title: 'ไม่มีรายการที่เลือก' }); return; }
+  Swal.fire({ title: 'ยืนยันการจับคู่?', text: 'จะบันทึก ' + updates.length + ' รายการ', icon: 'question',
+    showCancelButton: true, confirmButtonText: 'ยืนยัน', cancelButtonText: 'ยกเลิก' })
+    .then(function (res) {
+      if (!res.isConfirmed) return;
+      showGlobalLoading('กำลังบันทึกการจับคู่...');
+      google.script.run
+        .withSuccessHandler(function (res) {
+          hideGlobalLoading();
+          if (res.success) {
+            showToast('จับคู่ ' + res.count + ' รายการสำเร็จ');
+            $('#auditModalMapping').modal('hide');
+            openMissingAudit();
+          } else {
+            Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: res.message });
+          }
+        })
+        .withFailureHandler(function (err) { hideGlobalLoading(); showError(err); })
+        .adminFixAssetNameBulk(updates);
+    });
+}
+
+// ==========================================
+// ADD USER
+// ==========================================
+
+function openAddUserModal() { $('#adminAddUserModal').modal('show'); }
+
+function toggleNewUserFields() {
+  var v  = document.getElementById('new_targetSheet').value;
+  var sf = document.getElementById('new_studentFields');
+  if (sf) sf.style.display = (v && v.indexOf('นักเรียน') >= 0) ? 'block' : 'none';
+}
+
+function saveNewUser() {
+  var sheet = document.getElementById('new_targetSheet').value;
+  var name  = document.getElementById('new_name').value.trim();
+  var id    = document.getElementById('new_id').value.trim();
+  var room  = document.getElementById('new_room').value;
+  if (!name) { Swal.fire({ icon: 'warning', title: 'กรุณากรอกชื่อ-นามสกุล' }); return; }
+  if (sheet.indexOf('นักเรียน') >= 0 && (!id || !room)) { Swal.fire({ icon: 'warning', title: 'กรุณากรอกรหัสและห้อง' }); return; }
+  showGlobalLoading('กำลังเพิ่มรายชื่อ...');
+  google.script.run
+    .withSuccessHandler(function (res) {
+      hideGlobalLoading();
+      if (res.success) {
+        showToast('เพิ่มรายชื่อเรียบร้อย');
+        $('#adminAddUserModal').modal('hide');
+        loadAdminView();
+      } else {
+        Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: res.message });
+      }
+    })
+    .withFailureHandler(function (err) { hideGlobalLoading(); showError(err); })
+    .adminAddUser({ targetSheet: sheet, name: name, id: id || ('T-' + Date.now()), room: room || '' });
+}
+
+// ==========================================
+// ADVISOR RETURN MODAL
+// ==========================================
+
+function openAdvisorReturnModal(id) {
+  var p = systemData.find(function (x) { return String(x.id) === String(id); });
+  if (!p) { showError('ไม่พบข้อมูล'); return; }
+  document.getElementById('ar_userId').value     = p.id;
+  document.getElementById('ar_userType').value   = p.type || '';
+  document.getElementById('ar_userRoom').value   = p.room || '';
+  document.getElementById('ar_userName').value   = p.name || '';
+  document.getElementById('ar_userSerial').value = p.serial || '';
+  document.getElementById('ar_showName').textContent   = p.name;
+  document.getElementById('ar_showSerial').textContent = p.serial || '-';
+  var form = document.getElementById('advisorReturnForm');
+  if (form) {
+    var fi   = form.querySelector('[name="file_return"]');
+    if (fi) fi.value = '';
+    var note = form.querySelector('[name="note"]');
+    if (note) note.value = '';
+  }
+  $('#advisorReturnModal').modal('show');
+}
+
+function handleAdvisorReturnSubmit(form) {
+  var fd    = new FormData(form);
+  var pRet  = systemData.find(function(x){ return String(x.id) === String(fd.get('userId')); });
+  var obj   = {
+    userId: fd.get('userId'), userName: fd.get('userName'), userType: fd.get('userType'),
+    userRoom: fd.get('userRoom'), userSerial: fd.get('userSerial'), note: fd.get('note'),
+    source_sheet: pRet ? (pRet.source_sheet || '') : ''
+  };
+  var fr = form.querySelector('[name="file_return"]').files[0];
+  if (!fr) { Swal.fire({ icon: 'warning', title: 'กรุณาเลือกไฟล์หลักฐานการคืน' }); return false; }
+
+  var btn = document.querySelector('button[form="' + form.id + '"]');
+  var originalText = btn ? btn.innerHTML : 'ยืนยันการคืน';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>กำลังส่งไฟล์...';
+  }
+
+  readFileAsBase64(fr, function (b64) {
+    if (!b64) { Swal.fire({ icon: 'error', title: 'ไม่สามารถอ่านไฟล์ได้' }); return; }
+    obj.file_return_b64 = b64;
+    showGlobalLoading('กำลังส่งคำขอคืนเครื่อง...');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        hideGlobalLoading();
+        if (res.success) {
+          showToast('ส่งเรื่องเรียบร้อย — แอดมินจะดำเนินการต่อไป');
+          $('#advisorReturnModal').modal('hide');
+          _localUpdatePerson(obj.userId, obj.source_sheet, { borrowStatus: 'อยู่ระหว่างการส่งคืน' });
+        } else {
+          Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: res.message });
+        }
+      })
+      .withFailureHandler(function (err) { hideGlobalLoading(); showError(err); })
+      .processAdvisorReturn(obj);
+  });
+  return false;
+}
+
+// ==========================================
+// PREVIEW MODAL
+// ==========================================
+
+function openPreviewModal(url, type) {
+  if (!url) { Swal.fire({ icon: 'warning', title: 'ไม่พบลิงก์ไฟล์' }); return; }
+  _previewScale = 1; _previewRotation = 0;
+  var imgEl           = document.getElementById('previewImage');
+  var iframeContainer = document.getElementById('previewIframeContainer');
+  var iframeEl        = document.getElementById('previewIframe');
+  var imgContainer    = document.getElementById('imageContainer');
+  var isPdf = type === 'pdf' || /\.pdf($|\?)/i.test(url) ||
+    url.indexOf('export=download') >= 0 || url.indexOf('export=pdf') >= 0;
+  if (isPdf) {
+    if (imgEl) imgEl.style.display = 'none';
+    if (imgContainer) imgContainer.style.transform = '';
+    if (iframeContainer) iframeContainer.style.display = 'block';
+    if (iframeEl) iframeEl.src = url;
+  } else {
+    if (iframeContainer) iframeContainer.style.display = 'none';
+    if (iframeEl) iframeEl.src = '';
+    if (imgEl) { imgEl.style.display = 'block'; imgEl.src = url; }
+    if (imgContainer) { imgContainer.style.transform = 'scale(1) rotate(0deg)'; imgContainer.style.transformOrigin = 'top center'; }
+  }
+  $('#previewModal').modal('show');
+}
+
+function zoomPreview(factor) { _previewScale = Math.max(0.2, Math.min(5, _previewScale * factor)); _applyPreviewTransform(); }
+function rotatePreview()     { _previewRotation = (_previewRotation + 90) % 360; _applyPreviewTransform(); }
+function resetPreview()      { _previewScale = 1; _previewRotation = 0; _applyPreviewTransform(); }
+
+function _applyPreviewTransform() {
+  var container = document.getElementById('imageContainer');
+  if (container) {
+    container.style.transform = 'scale(' + _previewScale + ') rotate(' + _previewRotation + 'deg)';
+    container.style.transformOrigin = 'top center';
+    container.style.transition = 'transform 0.2s ease';
+  }
+}
+
+$(document).on('hide.bs.modal', '#previewModal', function () {
+  var iframeEl = document.getElementById('previewIframe');
+  if (iframeEl) iframeEl.src = '';
+  _previewScale = 1; _previewRotation = 0;
+});
+
+// ==========================================
+// ADVISOR: จัดการรายชื่อนักเรียน (เพิ่ม / แก้ไข / ลบ)
+// ==========================================
+
+function openAdvisorAddStudentModal() {
+  if (!currentUser || currentUser.role !== 'advisor') return;
+  var rawLevel = String(currentUser.level || '').trim();
+  if (rawLevel.indexOf('ม.') < 0) rawLevel = 'ม.' + rawLevel;
+  var allSheets = [];
+  systemData.forEach(function(r){ var s = r.source_sheet||''; if(s && allSheets.indexOf(s)<0) allSheets.push(s); });
+  var targetSheet = allSheets.find(function(l){
+    return l.indexOf('นักเรียน') >= 0 && l.indexOf(rawLevel) >= 0;
+  }) || '';
+  var el = document.getElementById('advisorAdd_targetSheet');
+  if (el) el.value = targetSheet;
+  var roomEl = document.getElementById('advisorAdd_room');
+  if (roomEl) roomEl.value = currentUser.room || '';
+  var sheetLabel = document.getElementById('advisorAdd_sheetLabel');
+  if (sheetLabel) sheetLabel.textContent = 'ชั้น ' + (targetSheet.replace('รายชื่อนักเรียน ', '') || '-') + ' ห้อง ' + (currentUser.room || '-');
+  ['advisorAdd_id', 'advisorAdd_name', 'advisorAdd_serial'].forEach(function(id){
+    var e = document.getElementById(id); if (e) e.value = '';
+  });
+  $('#advisorAddStudentModal').modal('show');
+}
+
+function saveAdvisorAddStudent() {
+  var targetSheet = ((document.getElementById('advisorAdd_targetSheet') || {}).value || '').trim();
+  var name        = ((document.getElementById('advisorAdd_name')        || {}).value || '').trim();
+  var id          = ((document.getElementById('advisorAdd_id')          || {}).value || '').trim();
+  var room        = ((document.getElementById('advisorAdd_room')        || {}).value || '').trim();
+  var serial      = ((document.getElementById('advisorAdd_serial')      || {}).value || '').trim() || '-';
+  if (!name)        { Swal.fire({ icon: 'warning', title: 'กรุณากรอกชื่อ-นามสกุล' }); return; }
+  if (!id)          { Swal.fire({ icon: 'warning', title: 'กรุณากรอกรหัสนักเรียน' }); return; }
+  if (!targetSheet) { Swal.fire({ icon: 'warning', title: 'ไม่พบข้อมูลห้องเรียน กรุณา Login ใหม่' }); return; }
+  showGlobalLoading('กำลังเพิ่มรายชื่อ...');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideGlobalLoading();
+      if (res.success) {
+        showToast(res.message, 'success');
+        $('#advisorAddStudentModal').modal('hide');
+        
+        // รีโหลดข้อมูลใหม่จาก Server เพื่อให้แน่ใจว่าข้อมูลถูกต้อง
+        showGlobalLoading('กำลังอัปเดตข้อมูล...');
+        _loadSystemDataWithRetry(0, function() {
+          hideGlobalLoading();
+          updateAdminStats(); 
+          _updateModeButtonCounts(); 
+          filterAdminTable();
+          showToast('อัปเดตข้อมูลเรียบร้อยแล้ว', 'success');
+        }, function(err) {
+          hideGlobalLoading();
+          showError('ไม่สามารถโหลดข้อมูลใหม่: ' + err);
+          // พยายามรีโหลดหน้าเพื่อแสดงข้อมูลล่าสุด
+          setTimeout(function() {
+            window.location.reload();
+          }, 2000);
+        });
+      } else { Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: res.message }); }
+    })
+    .withFailureHandler(function(err) { hideGlobalLoading(); showError(err); })
+    .advisorAddStudent({ targetSheet: targetSheet, id: id, name: name, room: room, serial: serial,
+      advisorLevel: currentUser ? currentUser.level : '',
+      advisorRoom:  currentUser ? currentUser.room  : '',
+      editorName:   currentUser ? currentUser.name  : '' });
+}
+
+function openAdvisorStudentEditModal(id, sheet) {
+  var p = systemData.find(function(x){
+    return String(x.id) === String(id) && (x.source_sheet || '') === (sheet || '');
+  });
+  if (!p) { showError('ไม่พบข้อมูลนักเรียน'); return; }
+  var setVal = function(elId, v) { var e = document.getElementById(elId); if (e) e.value = v; };
+  setVal('advisorEdit_origId',    p.id);
+  setVal('advisorEdit_origSheet', p.source_sheet || '');
+  setVal('advisorEdit_id',        p.id);
+  setVal('advisorEdit_name',      p.name  || '');
+  setVal('advisorEdit_room',      p.room  || '');
+  $('#advisorStudentEditModal').modal('show');
+}
+
+function saveAdvisorEditStudent() {
+  var origId  = ((document.getElementById('advisorEdit_origId')    || {}).value || '').trim();
+  var sheet   = ((document.getElementById('advisorEdit_origSheet')  || {}).value || '').trim();
+  var newId   = ((document.getElementById('advisorEdit_id')   || {}).value || '').trim();
+  var newName = ((document.getElementById('advisorEdit_name') || {}).value || '').trim();
+  var newRoom = ((document.getElementById('advisorEdit_room') || {}).value || '').trim();
+  if (!newName) { Swal.fire({ icon: 'warning', title: 'กรุณากรอกชื่อ-นามสกุล' }); return; }
+  if (!newId)   { Swal.fire({ icon: 'warning', title: 'กรุณากรอกรหัสนักเรียน' }); return; }
+  showGlobalLoading('กำลังบันทึกการแก้ไข...');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideGlobalLoading();
+      if (res.success) {
+        showToast(res.message, 'success');
+        $('#advisorStudentEditModal').modal('hide');
+        
+        // รีโหลดข้อมูลใหม่จาก Server เพื่อให้แน่ใจว่าข้อมูลถูกต้อง
+        showGlobalLoading('กำลังอัปเดตข้อมูล...');
+        _loadSystemDataWithRetry(0, function() {
+          hideGlobalLoading();
+          updateAdminStats(); 
+          _updateModeButtonCounts(); 
+          filterAdminTable();
+          showToast('อัปเดตข้อมูลเรียบร้อยแล้ว', 'success');
+        }, function(err) {
+          hideGlobalLoading();
+          showError('ไม่สามารถโหลดข้อมูลใหม่: ' + err);
+          // พยายามรีโหลดหน้าเพื่อแสดงข้อมูลล่าสุด
+          setTimeout(function() {
+            window.location.reload();
+          }, 2000);
+        });
+      } else { Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: res.message }); }
+    })
+    .withFailureHandler(function(err) { hideGlobalLoading(); showError(err); })
+    .advisorEditStudent({ id: origId, newId: newId, newName: newName, newRoom: newRoom,
+      source_sheet: sheet, editorName: currentUser ? currentUser.name : '' });
+}
+
+function advisorConfirmDeleteStudent(id, sheet, name) {
+  Swal.fire({
+    title: 'ลบ "' + escapeHtml(name) + '" ออกจากรายชื่อ?',
+    html: '<div class="text-danger small mt-1"><i class="fas fa-exclamation-triangle me-1"></i>การกระทำนี้ไม่สามารถย้อนกลับได้</div>',
+    icon: 'warning', showCancelButton: true,
+    confirmButtonText: '<i class="fas fa-trash me-1"></i>ลบรายชื่อ',
+    cancelButtonText: 'ยกเลิก', confirmButtonColor: '#dc3545'
+  }).then(function(res) {
+    if (!res.isConfirmed) return;
+    showGlobalLoading('กำลังลบรายชื่อ...');
+    google.script.run
+      .withSuccessHandler(function(r) {
+        hideGlobalLoading();
+        if (r.success) { 
+          showToast(r.message, 'success'); 
+          
+          // รีโหลดข้อมูลใหม่จาก Server เพื่อให้แน่ใจว่าข้อมูลถูกต้อง
+          showGlobalLoading('กำลังอัปเดตข้อมูล...');
+          _loadSystemDataWithRetry(0, function() {
+            hideGlobalLoading();
+            updateAdminStats(); 
+            _updateModeButtonCounts(); 
+            filterAdminTable();
+            showToast('อัปเดตข้อมูลเรียบร้อยแล้ว', 'success');
+          }, function(err) {
+            hideGlobalLoading();
+            showError('ไม่สามารถโหลดข้อมูลใหม่: ' + err);
+            // พยายามรีโหลดหน้าเพื่อแสดงข้อมูลล่าสุด
+            setTimeout(function() {
+              window.location.reload();
+            }, 2000);
+          });
+        }
+        else { Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: r.message }); }
+      })
+      .withFailureHandler(function(err) { hideGlobalLoading(); showError(err); })
+      .advisorDeleteStudent({ id: id, name: name, source_sheet: sheet,
+        editorName: currentUser ? currentUser.name : '' });
+  });
+}
+
+// ==========================================
+// ✅ ACTIVITY LOG (ประวัติกิจกรรมล่าสุด)
+// ==========================================
+
+var _activityLogData = [];
+
+function openActivityLog() {
+  $('#activityLogModal').modal('show');
+  loadActivityLog();
+  // โหลด inventory count ด้วย
+  google.script.run
+    .withSuccessHandler(function(count) {
+      var el = document.getElementById('stat-inventory');
+      if (el) el.textContent = count || 0;
+    })
+    .withFailureHandler(function(){})
+    .getInventoryAvailableCount();
+}
+
+function loadActivityLog() {
+  var listEl = document.getElementById('activityLogList');
+  if (listEl) listEl.innerHTML = '<div class="text-center py-5 text-muted"><div class="spinner-border spinner-border-sm me-2"></div> กำลังโหลด...</div>';
+  var countEl = document.getElementById('activityCountText');
+  if (countEl) countEl.textContent = 'กำลังโหลด...';
+
+  google.script.run
+    .withSuccessHandler(function(logs) {
+      _activityLogData = logs || [];
+      filterActivityLog('');
+    })
+    .withFailureHandler(function(err) {
+      var listEl = document.getElementById('activityLogList');
+      if (listEl) listEl.innerHTML = '<div class="text-center py-4 text-danger"><i class="fas fa-exclamation-circle me-2"></i>โหลดไม่สำเร็จ</div>';
+    })
+    .getActivityLog(60);
+}
+
+function filterActivityLog(searchVal) {
+  if (searchVal === undefined) searchVal = (document.getElementById('activitySearch') || {}).value || '';
+  var actionFilter = (document.getElementById('activityActionFilter') || {}).value || '';
+  var q = searchVal.toLowerCase().trim();
+
+  var filtered = _activityLogData.filter(function(log) {
+    if (actionFilter) {
+      if (actionFilter === 'ADMIN' && log.action.indexOf('ADMIN') < 0) return false;
+      if (actionFilter !== 'ADMIN' && log.action !== actionFilter) return false;
+    }
+    if (q) {
+      var hit = String(log.name || '').toLowerCase().indexOf(q) >= 0
+             || String(log.id   || '').toLowerCase().indexOf(q) >= 0
+             || String(log.status || '').toLowerCase().indexOf(q) >= 0
+             || String(log.serial || '').toLowerCase().indexOf(q) >= 0;
+      if (!hit) return false;
+    }
+    return true;
+  });
+
+  var countEl = document.getElementById('activityCountText');
+  if (countEl) countEl.textContent = filtered.length + ' รายการ';
+
+  var listEl = document.getElementById('activityLogList');
+  if (!listEl) return;
+
+  if (!filtered.length) {
+    listEl.innerHTML = '<div class="text-center py-5 text-muted"><i class="fas fa-search fa-2x mb-2 d-block"></i>ไม่พบรายการ</div>';
+    return;
+  }
+
+  var html = '';
+  filtered.forEach(function(log) {
+    var action  = log.action || '';
+    var cls     = action.indexOf('RETURN') >= 0 ? 'act-return'
+                : action.indexOf('APPROVE') >= 0 ? 'act-approve'
+                : action.indexOf('ADMIN') >= 0   ? 'act-admin'
+                : 'act-upload';
+
+    var icon    = action.indexOf('RETURN') >= 0 ? '🔄'
+                : action.indexOf('APPROVE') >= 0 ? '✅'
+                : action.indexOf('ADMIN') >= 0   ? '⚙️'
+                : '📄';
+
+    var statusBadge = '';
+    var s = log.status || '';
+    if (s.indexOf('คืน') >= 0)           statusBadge = '<span class="badge bg-warning text-dark ms-1">' + escapeHtml(s) + '</span>';
+    else if (s.indexOf('ผ่าน') >= 0)     statusBadge = '<span class="badge bg-success ms-1">' + escapeHtml(s) + '</span>';
+    else if (s.indexOf('ยืม') >= 0)      statusBadge = '<span class="badge bg-primary ms-1">' + escapeHtml(s) + '</span>';
+    else if (s.indexOf('ไม่ผ่าน') >= 0) statusBadge = '<span class="badge bg-danger ms-1">' + escapeHtml(s) + '</span>';
+    else if (s)                           statusBadge = '<span class="badge bg-secondary ms-1">' + escapeHtml(s) + '</span>';
+
+    html += '<div class="activity-item ' + cls + '">' +
+      '<div class="d-flex justify-content-between align-items-start">' +
+        '<div>' +
+          '<span class="act-name">' + icon + ' ' + escapeHtml(log.name || '-') + '</span>' +
+          (log.room ? '<small class="text-muted ms-2">ห้อง ' + escapeHtml(log.room) + '</small>' : '') +
+          statusBadge +
+        '</div>' +
+        '<span class="act-time text-nowrap">' + escapeHtml(log.ts || '') + '</span>' +
+      '</div>' +
+      (log.serial && log.serial !== '-' ? '<div class="mt-1"><code class="act-status text-muted">Serial: ' + escapeHtml(log.serial) + '</code></div>' : '') +
+      (log.note ? '<div class="act-status text-muted mt-1 text-truncate" style="max-width:400px;" title="' + escapeHtml(log.note) + '">' + escapeHtml(log.note.substring(0, 80)) + '</div>' : '') +
+    '</div>';
+  });
+  listEl.innerHTML = html;
+}
+
+// ==========================================
+// ✅ COPY SERIAL (คลิก serial code เพื่อ copy)
+// ==========================================
+function copySerial(text) {
+  if (!text || text === '-') return;
+  try {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('คัดลอก Serial: ' + text, 'success', 1500);
+  } catch(e) {}
+}
+
+// ==========================================
+// ✅ KEYBOARD SHORTCUTS
+// ==========================================
+document.addEventListener('keydown', function(e) {
+  // กด / หรือ Ctrl+F เพื่อ focus ช่องค้นหา (เมื่ออยู่หน้า admin/table)
+  var tag = (document.activeElement || {}).tagName || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if ((e.key === '/' || (e.ctrlKey && e.key === 'f')) && !e.altKey) {
+    var inp = document.getElementById('adminSearchInput') || document.getElementById('tableSearchInput');
+    if (inp && !inp.closest('.hidden')) {
+      e.preventDefault();
+      inp.focus();
+      inp.select();
+    }
+  }
+  // กด Escape ปิด modal ที่เปิดอยู่
+  if (e.key === 'Escape') {
+    var openModal = document.querySelector('.modal.show');
+    if (openModal) {
+      var bsModal = bootstrap.Modal.getInstance(openModal);
+      if (bsModal) bsModal.hide();
+    }
+  }
+});
 </script>
