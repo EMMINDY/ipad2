@@ -3,148 +3,275 @@
 <head>
   <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <title>ระบบตรวจสอบสถานะ iPad โรงเรียนอรัญประเทศ</title>
+  <title>ระบบจัดเก็บเอกสารการยืม-คืน ไอแพด โรงเรียนอรัญประเทศ</title>
   
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.datatables.net/1.13.4/css/dataTables.bootstrap5.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <?!= include('Styles'); ?>
+
+  <style>
+    /* ── Admin UI ─────────────────────────────────────── */
+    .admin-mode-btn { transition: all 0.2s ease; position: relative; }
+    .admin-mode-btn .mode-count-badge {
+      position: absolute; top: -6px; right: -6px;
+      background: #dc3545; color: #fff; border-radius: 50px;
+      font-size: 0.7rem; font-weight: 700;
+      padding: 2px 6px; min-width: 20px; text-align: center;
+      box-shadow: 0 2px 6px rgba(220,53,69,0.4);
+    }
+    .admin-search-box { max-width: 240px; }
+    .serial-code {
+      font-size: 0.72rem; color: #6c757d;
+      background: #f4f4f4; padding: 2px 5px;
+      border-radius: 4px; font-family: monospace;
+      display: inline-block; max-width: 120px;
+      overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; vertical-align: middle;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .serial-code:hover { background: #e0e0e0; }
+    .activity-item {
+      border-left: 3px solid #dee2e6; padding: 8px 12px;
+      margin: 0; border-bottom: 1px solid #f3f3f3;
+      transition: background 0.1s;
+    }
+    .activity-item:hover { background: #f8f9fa; }
+    .activity-item .act-name { font-weight: 600; font-size: .9rem; }
+    .activity-item .act-time { font-size: .72rem; color: #6c757d; }
+    .activity-item .act-status { font-size: .78rem; }
+    .activity-item.act-return { border-left-color: #ffc107; }
+    .activity-item.act-approve { border-left-color: #198754; }
+    .activity-item.act-admin { border-left-color: #dc3545; }
+    .activity-item.act-upload { border-left-color: #0d6efd; }
+    #adminTable tr.table-warning { background: rgba(255,193,7,0.12) !important; }
+    #adminTable tr.table-info    { background: rgba(13,202,240,0.10) !important; }
+    #adminTable td { padding: 8px 8px; }
+    .stat-card-admin {
+      border-radius: 12px; padding: 10px 14px;
+      text-align: center; background: #fff;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+    }
+    .stat-card-admin h4 { margin: 0; font-size: 1.4rem; }
+    .stat-card-admin small { font-size: 0.72rem; color: #6c757d; font-weight: 600; }
+    .admin-toolbar { gap: 6px; }
+    @media (max-width: 575px) {
+      .admin-search-box { max-width: 100%; }
+      .mode-btn-text { display: none; }
+    }
+  </style>
+
+  <script>
+  const manifest = {
+    "name": "ระบบจัดเก็บเอกสารการยืม-คืน ไอแพด",
+    "short_name": "ยืม-คืน iPad",
+    "start_url": "https://script.google.com/a/macros/aran.ac.th/s/AKfycbxYmFOUQqvoaicHNwGzhSatzwwEu4IF_uJhb4s0rcjOpSQFYEwv1HKqAn_vKoFDRuDT/exec",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#1a73e8",
+    "icons": [
+      { "src": "https://drive.google.com/file/d/1F9KWlzgtqzsWPfotOgNGsQ0cfPX2ahwX/view?usp=drive_link", "sizes": "192x192", "type": "image/png" },
+      { "src": "https://drive.google.com/file/d/1F9KWlzgtqzsWPfotOgNGsQ0cfPX2ahwX/view?usp=drive_link", "sizes": "512x512", "type": "image/png" }
+    ]
+  };
+  const stringManifest = JSON.stringify(manifest);
+  const blob = new Blob([stringManifest], {type: 'application/json'});
+  const manifestURL = URL.createObjectURL(blob);
+  document.querySelector('head').insertAdjacentHTML('beforeend', `<link rel="manifest" href="${manifestURL}">`);
+  </script>
 </head>
+
 <body>
 
+  <!-- Page Loader -->
+  <div id="initial-page-loader" style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:#fff;z-index:9999;display:flex;flex-direction:column;justify-content:center;align-items:center;">
+    <div class="spinner-grow text-primary" role="status" style="width:3rem;height:3rem;"></div>
+    <div class="mt-3 fw-bold text-secondary" style="font-size:1.1rem;">กำลังเตรียมระบบ...</div>
+    <div class="text-muted small mt-1">โรงเรียนอรัญประเทศ</div>
+  </div>
+
+  <!-- Landing -->
   <section id="view-landing" class="landing-section">
     <div class="glass-card fade-in">
       <div class="mb-3">
-        <img src="https://drive.google.com/thumbnail?id=1F9KWlzgtqzsWPfotOgNGsQ0cfPX2ahwX&sz=w400" class="landing-logo" alt="Logo โรงเรียนอรัญประเทศ" style="max-width: 130px; height: auto; filter: drop-shadow(0 4px 4px rgba(0,0,0,0.1));">
+        <img src="https://drive.google.com/thumbnail?id=1F9KWlzgtqzsWPfotOgNGsQ0cfPX2ahwX&sz=w400" class="landing-logo" alt="Logo โรงเรียนอรัญประเทศ" style="max-width:130px;height:auto;filter:drop-shadow(0 4px 4px rgba(0,0,0,0.1));">
       </div>
-      
-      <h4 class="fw-bold mb-1 text-dark">ระบบตรวจสอบ iPad</h4>
+      <h4 class="fw-bold mb-1 text-dark">ระบบจัดเก็บเอกสารการยืม-คืน ไอแพด</h4>
       <p class="mb-4 text-muted small">โรงเรียนอรัญประเทศ</p>
-      
-      <button onclick="enterSystem()" class="btn btn-primary btn-lg rounded-pill px-4 fw-bold shadow w-100 mb-3" style="max-width: 320px;">
+      <button onclick="btnClick(this, enterSystem)" class="btn btn-primary btn-lg rounded-pill px-4 fw-bold shadow w-100 mb-3" style="max-width:320px;">
         <i class="fas fa-search me-2"></i> ตรวจสอบสถานะ
       </button>
-
-      <button onclick="showAdvisorLogin()" class="btn btn-outline-secondary btn-lg rounded-pill px-4 fw-bold w-100" style="max-width: 320px;">
+      <button onclick="showUploadDocModal()" class="btn btn-success btn-lg rounded-pill px-4 fw-bold w-100 mb-3" style="max-width:320px;">
+        <i class="fas fa-file-upload me-2"></i> อัปโหลดเอกสาร (ยืม/คืน)
+      </button>
+      <button onclick="showAdvisorLogin()" class="btn btn-outline-secondary btn-lg rounded-pill px-4 fw-bold w-100" style="max-width:320px;">
         <i class="fas fa-user-tie me-2"></i> ครูที่ปรึกษา
       </button>
-
-      <div id="loading-spinner" class="mt-4 text-primary small hidden">
-        <div class="spinner-border spinner-border-sm" role="status"></div> กำลังโหลดข้อมูล...
-      </div>
     </div>
   </section>
 
+  <!-- Navbar -->
   <nav id="main-nav" class="navbar custom-navbar shadow-sm hidden sticky-top">
     <div class="container-fluid px-2 px-md-3">
       <a class="navbar-brand fw-bold d-flex align-items-center" href="javascript:void(0)" onclick="goHome(); return false;">
-        <img src="https://drive.google.com/thumbnail?id=1F9KWlzgtqzsWPfotOgNGsQ0cfPX2ahwX&sz=w200" class="navbar-logo" alt="Logo" style="height: 40px; width: auto; margin-right: 10px;">
-        <span class="d-none d-sm-inline">ระบบ iPad รร.อรัญประเทศ</span>
-        <span class="d-inline d-sm-none">ระบบ iPad อรัญฯ</span>
+        <img src="https://drive.google.com/thumbnail?id=1F9KWlzgtqzsWPfotOgNGsQ0cfPX2ahwX&sz=w200" class="navbar-logo" alt="Logo" style="height:40px;width:auto;margin-right:10px;">
+        <span class="d-none d-sm-inline">ระบบยืม-คืน ไอแพด รร.อรัญประเทศ</span>
+        <span class="d-inline d-sm-none">ยืม-คืน iPad อรัญฯ</span>
       </a>
-      
       <div>
-        <button class="btn btn-sm btn-light rounded-circle shadow-sm me-1 text-primary" onclick="goHome()">
-          <i class="fas fa-home"></i>
-        </button>
-        <button class="btn btn-sm btn-light rounded-circle shadow-sm text-danger" onclick="goLanding()">
-          <i class="fas fa-power-off"></i>
-        </button>
+        <button class="btn btn-sm btn-light rounded-circle shadow-sm me-1 text-primary" onclick="goHome()"><i class="fas fa-home"></i></button>
+        <button class="btn btn-sm btn-light rounded-circle shadow-sm text-danger" onclick="goLanding()"><i class="fas fa-power-off"></i></button>
       </div>
     </div>
   </nav>
 
   <div class="container mt-3 mb-5">
-    
-  <section id="view-dashboard" class="hidden fade-in">
-      
-      <div class="row g-2 mb-4 text-center">
+
+    <!-- ══ STEP 1: DASHBOARD — เลือกระดับชั้น ══════════════ -->
+    <section id="view-dashboard" class="hidden fade-in">
+      <!-- Stats bar -->
+      <div class="row g-2 mb-4">
         <div class="col-4">
-          <div class="p-3 bg-white rounded-3 shadow-sm h-100 border-start border-4 border-primary">
-            <h3 class="mb-0 fw-bold text-primary" id="totalAssetsText">0</h3>
-            <small class="text-muted fw-bold">เครื่องทั้งหมด</small>
+          <div class="stat-bar-card border-primary">
+            <div class="stat-bar-num text-primary" id="totalAssetsText">—</div>
+            <div class="stat-bar-lbl">เครื่องทั้งหมด</div>
           </div>
         </div>
         <div class="col-4">
-          <div class="p-3 bg-white rounded-3 shadow-sm h-100 border-start border-4 border-success">
-            <h3 class="mb-0 fw-bold text-success" id="borrowedCountText">0</h3>
-            <small class="text-muted fw-bold">ยืมไปแล้ว</small>
+          <div class="stat-bar-card border-success">
+            <div class="stat-bar-num text-success" id="borrowedCountText">—</div>
+            <div class="stat-bar-lbl">ยืมแล้ว</div>
           </div>
         </div>
         <div class="col-4">
-          <div class="p-3 bg-white rounded-3 shadow-sm h-100 border-start border-4 border-secondary">
-            <h3 class="mb-0 fw-bold text-secondary" id="availableCountText">0</h3>
-            <small class="text-muted fw-bold">คงเหลือ</small>
+          <div class="stat-bar-card border-secondary">
+            <div class="stat-bar-num text-secondary" id="availableCountText">—</div>
+            <div class="stat-bar-lbl">คงเหลือ</div>
           </div>
         </div>
       </div>
-
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h5 class="fw-bold text-secondary mb-0"><i class="fas fa-layer-group me-2"></i>เลือกระดับชั้น</h5>
+      <!-- Step label -->
+      <div class="step-label mb-3">
+        <span class="step-circle">1</span>
+        <span>เลือกระดับชั้น</span>
       </div>
       <div class="row g-3" id="dashboard-grid"></div>
     </section>
 
-    <section id="view-table" class="hidden fade-in">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-           <h5 class="fw-bold mb-0 text-primary" id="table-title">รายชื่อ</h5>
-           <small class="text-muted" id="table-badge">เลือกห้องเรียน</small>
-        </div>
-        <button class="btn btn-outline-secondary btn-sm rounded-pill px-3" onclick="goBackToDashboard()">
-          <i class="fas fa-arrow-left"></i> กลับ
+    <!-- ══ STEP 2: ROOM PICKER — เลือกห้อง ════════════════ -->
+    <section id="view-room" class="hidden fade-in">
+      <!-- Breadcrumb nav -->
+      <div class="breadcrumb-nav mb-4">
+        <button class="breadcrumb-btn" onclick="goToDashboard()">
+          <i class="fas fa-home"></i> หน้าหลัก
         </button>
+        <span class="breadcrumb-sep"><i class="fas fa-chevron-right"></i></span>
+        <span class="breadcrumb-current" id="room-level-label">ม.3</span>
       </div>
-
-      <div class="card shadow-sm border-0 mb-3 rounded-4">
-        <div class="card-body py-2 px-3">
-          <div class="row align-items-center">
-            <div class="col-auto px-0"><i class="fas fa-filter text-muted ms-2"></i></div>
-            <div class="col">
-              <select id="roomFilter" class="form-select border-0 bg-transparent fw-bold text-primary" onchange="filterByRoom()">
-                <option value="">แสดงทุกห้อง</option>
-              </select>
-            </div>
-          </div>
-        </div>
+      <!-- Step label -->
+      <div class="step-label mb-3">
+        <span class="step-circle">2</span>
+        <span>เลือกห้องเรียน</span>
       </div>
-
-      <div class="card shadow-sm border-0 rounded-4 overflow-hidden">
-        <div class="card-body p-0">
-          <div class="table-responsive">
-            <table id="dataTable" class="table table-hover align-middle mb-0 w-100">
-              <thead class="table-light text-secondary small"></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+      <!-- Room grid -->
+      <div class="row g-3" id="room-picker-grid"></div>
     </section>
 
-    <section id="view-admin" class="hidden fade-in">
-       <div class="d-flex justify-content-between align-items-center mb-4">
-        <h5 class="fw-bold text-danger">
-          <i class="fas fa-user-shield me-2"></i><span id="admin-title-text">ผู้ดูแลระบบ</span>
-        </h5>
-        <div class="d-flex flex-wrap gap-1 justify-content-end">
-          <button class="btn btn-warning btn-sm rounded-pill shadow-sm text-dark fw-bold" onclick="openMissingAudit()">
-            <i class="fas fa-exclamation-triangle me-1"></i> ตรวจสอบตกหล่น
-          </button>
+    <!-- ══ STEP 3: TABLE VIEW — รายชื่อนักเรียน ══════════ -->
+    <section id="view-table" class="hidden fade-in">
 
-          <button class="btn btn-info btn-sm rounded-pill shadow-sm text-white" onclick="refreshSystemData()">
-            <i class="fas fa-sync-alt me-1"></i> อัปเดต
-          </button>
+      <!-- Breadcrumb nav -->
+      <div class="breadcrumb-nav mb-3">
+        <button class="breadcrumb-btn" onclick="goToDashboard()">
+          <i class="fas fa-home"></i> หน้าหลัก
+        </button>
+        <span class="breadcrumb-sep"><i class="fas fa-chevron-right"></i></span>
+        <button class="breadcrumb-btn" id="breadcrumb-level-btn" onclick="goToRoomPicker()">
+          <span id="breadcrumb-level-text">ม.3</span>
+        </button>
+        <span class="breadcrumb-sep" id="breadcrumb-room-sep"><i class="fas fa-chevron-right"></i></span>
+        <span class="breadcrumb-current" id="breadcrumb-room-text"></span>
+      </div>
 
-          <button class="btn btn-success btn-sm rounded-pill shadow-sm" onclick="openExportModal()">
-            <i class="fas fa-file-excel me-1"></i> Export
-          </button>
+      <!-- Title + count -->
+      <div class="table-header-card mb-3">
+        <div>
+          <div class="fw-bold" id="table-title" style="font-size:1.1rem;color:#1a1a2e;">รายชื่อ</div>
+          <div class="text-muted" style="font-size:.82rem;" id="table-badge">ห้อง</div>
+        </div>
+        <div class="text-end">
+          <div class="fw-bold text-primary" style="font-size:1.4rem;" id="filteredCountText">0</div>
+          <div class="text-muted" style="font-size:.72rem;">คน</div>
+        </div>
+      </div>
 
-          <button class="btn btn-primary btn-sm rounded-pill shadow-sm" onclick="openAdvancedReport()">
-            <i class="fas fa-chart-line me-1"></i> สถิติ
+      <!-- Mini stats -->
+      <div id="table-mini-stats" class="row g-2 mb-3"></div>
+
+      <!-- Search + filter bar -->
+      <div class="filter-bar mb-3">
+        <div class="filter-search-wrap mb-2">
+          <i class="fas fa-search filter-search-icon"></i>
+          <input type="text" id="tableSearchInput" class="filter-search-input"
+            placeholder="ค้นหาชื่อ, รหัส, Serial..."
+            oninput="onTableSearch(this.value)">
+          <button class="filter-search-clear" onclick="clearTableSearch()" title="ล้าง">
+            <i class="fas fa-times"></i>
           </button>
-          
-          <button id="btn-add-user" class="btn btn-outline-success btn-sm rounded-pill shadow-sm" onclick="openAddUserModal()">
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <select id="statusFilter" class="filter-select" onchange="applyTableFilters()">
+            <option value="">📋 ทุกสถานะ</option>
+            <option value="ยืมอยู่">✅ ยืมอยู่</option>
+            <option value="ยังไม่ยืม">⬜ ยังไม่ยืม</option>
+            <option value="อยู่ระหว่างการส่งคืน">🔄 ระหว่างคืน</option>
+            <option value="คืนแล้ว">📦 คืนแล้ว</option>
+            <option value="ส่งซ่อม">🔧 ส่งซ่อม</option>
+          </select>
+          <select id="docFilter" class="filter-select" onchange="applyTableFilters()">
+            <option value="">📄 ทุกเอกสาร</option>
+            <option value="เอกสารผ่าน">✅ ผ่านแล้ว</option>
+            <option value="รอตรวจสอบ">⏳ รอตรวจ</option>
+            <option value="เอกสารไม่ผ่าน">❌ ไม่ผ่าน</option>
+            <option value="ยังไม่ส่ง">📋 ยังไม่ส่ง</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- List container -->
+      <div id="table-list-container" class="mb-4"></div>
+
+    </section>
+
+    <!-- ── ADMIN VIEW ─────────────────────────────── -->
+    <section id="view-admin" class="hidden fade-in" style="max-width:1100px; margin: 0 auto;">
+
+      <!-- Header Bar -->
+      <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 bg-white p-3 rounded-4 shadow-sm gap-2">
+        <div>
+          <h5 class="fw-bold text-danger mb-0">
+            <i class="fas fa-user-shield me-2"></i><span id="admin-title-text">ผู้ดูแลระบบ</span>
+          </h5>
+          <small class="text-muted" id="adminRoleDisplay">กำลังใช้งานสิทธิ์: <span class="fw-bold text-dark">แอดมิน</span></small>
+        </div>
+        <div class="d-flex flex-wrap admin-toolbar">
+          <button id="btn-audit-missing" class="btn btn-warning btn-sm rounded-pill fw-bold text-dark" onclick="openMissingAudit()">
+            <i class="fas fa-exclamation-triangle me-1"></i><span class="mode-btn-text"> ตรวจสอบตกหล่น</span>
+          </button>
+          <button id="btn-activity" class="btn btn-info btn-sm rounded-pill text-white" onclick="openActivityLog()" title="ประวัติกิจกรรม">
+            <i class="fas fa-history me-1"></i><span class="mode-btn-text"> ประวัติ</span>
+          </button>
+          <button id="btn-refresh" class="btn btn-outline-info btn-sm rounded-pill" onclick="refreshSystemData()">
+            <i class="fas fa-sync-alt me-1"></i><span class="mode-btn-text"> อัปเดต</span>
+          </button>
+          <button id="btn-export" class="btn btn-success btn-sm rounded-pill" onclick="openExportModal()">
+            <i class="fas fa-file-excel me-1"></i><span class="mode-btn-text"> Export</span>
+          </button>
+          <button id="btn-report" class="btn btn-primary btn-sm rounded-pill" onclick="openAdvancedReport()">
+            <i class="fas fa-chart-line me-1"></i><span class="mode-btn-text"> สถิติ</span>
+          </button>
+          <button id="btn-add-user" class="btn btn-outline-success btn-sm rounded-pill" onclick="openAddUserModal()">
             <i class="fas fa-plus"></i>
           </button>
           <button class="btn btn-outline-danger btn-sm rounded-pill" onclick="exitAdmin()">
@@ -152,43 +279,447 @@
           </button>
         </div>
       </div>
-      
-      <div class="row g-2 mb-4 text-center">
-         <div class="col-4 col-md-2"><div class="p-2 bg-white rounded-3 shadow-sm h-100 border-start border-3 border-dark"><h4 class="mb-0 fw-bold text-dark" id="stat-total">0</h4><small class="text-muted" style="font-size:10px;">ทั้งหมด</small></div></div>
-         <div class="col-4 col-md-2"><div class="p-2 bg-white rounded-3 shadow-sm h-100 border-start border-3 border-secondary"><h4 class="mb-0 fw-bold text-secondary" id="stat-notborrow">0</h4><small class="text-muted" style="font-size:10px;">ยังไม่ยืม</small></div></div>
-         <div class="col-4 col-md-2"><div class="p-2 bg-white rounded-3 shadow-sm h-100 border-start border-3 border-warning"><h4 class="mb-0 fw-bold text-warning" id="stat-pending">0</h4><small class="text-muted" style="font-size:10px;">รอตรวจ</small></div></div>
-         <div class="col-4 col-md-2"><div class="p-2 bg-white rounded-3 shadow-sm h-100 border-start border-3 border-success"><h4 class="mb-0 fw-bold text-success" id="stat-borrowed">0</h4><small class="text-muted" style="font-size:10px;">ยืมอยู่</small></div></div>
-         <div class="col-4 col-md-2"><div class="p-2 bg-white rounded-3 shadow-sm h-100 border-start border-3 border-primary"><h4 class="mb-0 fw-bold text-primary" id="stat-returned">0</h4><small class="text-muted" style="font-size:10px;">คืนแล้ว</small></div></div>
-         <div class="col-4 col-md-2"><div class="p-2 bg-white rounded-3 shadow-sm h-100 border-start border-3 border-danger"><h4 class="mb-0 fw-bold text-danger" id="stat-repair">0</h4><small class="text-muted" style="font-size:10px;">ซ่อม/สละ</small></div></div>
+
+      <!-- Stats Row -->
+      <div class="row g-2 mb-3 text-center">
+        <div class="col"><div class="stat-card-admin border-start border-3 border-dark"><h4 class="fw-bold text-dark" id="stat-total">0</h4><small>ทั้งหมด</small></div></div>
+        <div class="col"><div class="stat-card-admin border-start border-3 border-primary"><h4 class="fw-bold text-primary" id="stat-borrowed">0</h4><small>ยืมอยู่</small></div></div>
+        <div class="col"><div class="stat-card-admin border-start border-3 border-secondary"><h4 class="fw-bold text-secondary" id="stat-notborrow">0</h4><small>ยังไม่ยืม</small></div></div>
+        <div class="col"><div class="stat-card-admin border-start border-3 border-info"><h4 class="fw-bold text-info" id="stat-pending">0</h4><small>รอตรวจ</small></div></div>
+        <div class="col d-none d-md-block"><div class="stat-card-admin border-start border-3 border-success"><h4 class="fw-bold text-success" id="stat-returned">0</h4><small>คืนแล้ว</small></div></div>
+        <div class="col d-none d-md-block"><div class="stat-card-admin border-start border-3 border-danger"><h4 class="fw-bold text-danger" id="stat-repair">0</h4><small>ซ่อม/สละ</small></div></div>
+        <div class="col d-none d-md-block" id="stat-inv-col"><div class="stat-card-admin border-start border-3 border-warning"><h4 class="fw-bold text-warning" id="stat-inventory">—</h4><small>iPad ว่าง</small></div></div>
       </div>
 
-      <div class="card border-0 shadow-sm mb-3 bg-light">
-        <div class="card-body py-2">
-          <div class="row g-2 align-items-center">
-            <div class="col-auto text-muted small fw-bold"><i class="fas fa-filter"></i> กรองข้อมูล:</div>
-            <div class="col-md-3 col-6">
-              <select id="adminLevelFilter" class="form-select form-select-sm border-0 shadow-none fw-bold text-primary" onchange="filterAdminTable()"><option value="">ทุกระดับชั้น</option></select>
+      <!-- Mode Buttons -->
+      <div class="row mb-3 g-2">
+        <div class="col-4">
+          <button id="btnModeAll" class="btn btn-primary w-100 py-2 rounded-4 shadow-sm fw-bold admin-mode-btn" onclick="setAdminMode('all')">
+            <i class="fas fa-users d-block mb-1 fs-5"></i>
+            <span class="mode-btn-text">รายชื่อทั้งหมด</span>
+            <span class="d-block d-md-none small">ทั้งหมด</span>
+          </button>
+        </div>
+        <div class="col-4">
+          <button id="btnModeReturn" class="btn btn-light w-100 py-2 rounded-4 shadow-sm fw-bold border admin-mode-btn text-dark" onclick="setAdminMode('return')">
+            <span id="modeReturnCount" class="mode-count-badge" style="display:none;"></span>
+            <i class="fas fa-undo d-block mb-1 fs-5 text-warning"></i>
+            <span class="mode-btn-text">รออนุมัติคืน</span>
+            <span class="d-block d-md-none small">คืน iPad</span>
+          </button>
+        </div>
+        <div class="col-4">
+          <button id="btnModeDoc" class="btn btn-light w-100 py-2 rounded-4 shadow-sm fw-bold border admin-mode-btn text-dark" onclick="setAdminMode('doc')">
+            <span id="modeDocCount" class="mode-count-badge" style="display:none;"></span>
+            <i class="fas fa-file-alt d-block mb-1 fs-5 text-info"></i>
+            <span class="mode-btn-text">รอตรวจเอกสาร</span>
+            <span class="d-block d-md-none small">เอกสาร</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Filter Bar + Search -->
+      <div id="adminFilterBox" class="card border-0 shadow-sm mb-3 bg-white rounded-4">
+        <div class="card-body py-2 px-3">
+          <div class="row g-2 align-items-center flex-wrap">
+            <div class="col-auto text-muted small fw-bold d-none d-md-block"><i class="fas fa-filter"></i></div>
+            <div class="col-12 col-md-auto admin-search-box">
+              <div class="input-group input-group-sm">
+                <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                <input type="text" id="adminSearchInput" class="form-control border-0 bg-light"
+                  placeholder="ค้นหาชื่อ / รหัส / Serial..."
+                  oninput="onAdminSearchInput(this.value)">
+              </div>
             </div>
-            <div class="col-md-3 col-6">
-              <select id="adminRoomFilter" class="form-select form-select-sm border-0 shadow-none fw-bold text-primary" onchange="filterAdminTable()"><option value="">ทุกห้อง</option></select>
+            <div class="col-6 col-md-auto">
+              <select id="adminLevelFilter" class="form-select form-select-sm border-0 bg-light fw-bold" onchange="filterAdminTable()">
+                <option value="">ทุกระดับชั้น</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-auto">
+              <select id="adminRoomFilter" class="form-select form-select-sm border-0 bg-light fw-bold" onchange="filterAdminTable()">
+                <option value="">ทุกห้อง</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-auto">
+              <select id="adminStatusFilter" class="form-select form-select-sm border-0 bg-light fw-bold" onchange="filterAdminTable()">
+                <option value="">ทุกสถานะ</option>
+                <option value="ยืมอยู่">ยืมอยู่</option>
+                <option value="อยู่ระหว่างการส่งคืน">ระหว่างคืน</option>
+                <option value="คืนแล้ว">คืนแล้ว</option>
+                <option value="ยังไม่ยืม">ยังไม่ยืม</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-auto">
+              <select id="adminSortFilter" class="form-select form-select-sm border-0 bg-light fw-bold" onchange="filterAdminTable()">
+                <option value="name">เรียงชื่อ</option>
+                <option value="id">เรียงรหัส</option>
+                <option value="room">เรียงห้อง</option>
+                <option value="status">เรียงสถานะ</option>
+              </select>
+            </div>
+            <div class="col-auto small text-muted ms-auto">
+              <span id="adminFilteredCount" class="fw-bold text-primary">0</span> รายการ
             </div>
           </div>
         </div>
       </div>
 
-      <div class="card shadow border-0 rounded-4">
+      <!-- Admin Table -->
+      <div class="card shadow-sm border-0 rounded-4 mb-5">
         <div class="card-body p-0">
+          <div class="d-flex justify-content-between align-items-center px-3 pt-3 pb-2 border-bottom">
+            <h6 id="adminTableTitle" class="fw-bold text-dark mb-0"><i class="fas fa-list text-primary me-2"></i>รายชื่อ</h6>
+            <span id="adminTableBadge" class="badge bg-primary rounded-pill px-3">...</span>
+          </div>
           <div class="table-responsive">
-            <table id="adminTable" class="table table-striped w-100 small">
-              <thead><tr><th>รหัส</th><th>ชื่อ</th><th>สถานะ</th><th>เอกสาร</th><th>จัดการ</th></tr></thead>
+            <table id="adminTable" class="table table-hover align-middle w-100 small mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th style="width:90px;">รหัส</th>
+                  <th>ชื่อ-นามสกุล / ห้อง</th>
+                  <th style="width:120px;">Serial</th>
+                  <th style="width:130px;">สถานะเครื่อง</th>
+                  <th style="width:120px;">สถานะเอกสาร</th>
+                  <th style="width:140px;">จัดการ</th>
+                </tr>
+              </thead>
               <tbody></tbody>
             </table>
           </div>
         </div>
       </div>
+
     </section>
+
+  </div><!-- /container -->
+
+  <!-- Footer -->
+  <div class="text-center py-3" style="color:#6c757d;font-size:0.82rem;">
+    <hr style="width:30%;margin:0 auto 8px auto;border-color:#dee2e6;">
+    พัฒนาระบบโดย <strong>คุณครูวิษณุ แจ่มปรีชา</strong><br>
+    <span style="font-size:0.74rem;">โรงเรียนอรัญประเทศ</span>
   </div>
-  
+
+  <!-- Admin Float Button -->
+  <div id="admin-float-btn" class="position-fixed bottom-0 end-0 p-3" style="z-index:1030">
+    <button class="btn btn-secondary rounded-circle shadow" onclick="showAdminLogin()" style="width:50px;height:50px;" title="เข้าสู่ระบบแอดมิน">
+      <i class="fas fa-cog"></i>
+    </button>
+  </div>
+
+  <!-- ═══════════════ MODALS ══════════════════ -->
+
+  <!-- ADMIN LOGIN -->
+  <div class="modal fade" id="adminLoginModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+      <div class="modal-content rounded-4 border-0">
+        <div class="modal-header bg-dark text-white border-0">
+          <h6 class="modal-title"><i class="fas fa-lock me-1"></i> Admin Access</h6>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="text" id="adminUsernameInput" class="form-control text-center rounded-pill mb-2" placeholder="Username">
+          <input type="password" id="adminPasswordInput" class="form-control text-center rounded-pill mb-2" placeholder="Password" onkeydown="if(event.key==='Enter') loginAdmin()">
+          <button onclick="loginAdmin()" class="btn btn-dark w-100 rounded-pill">Login</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADVISOR LOGIN -->
+  <div class="modal fade" id="advisorLoginModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+      <div class="modal-content rounded-4 border-0">
+        <div class="modal-header bg-light border-0">
+          <h6 class="modal-title text-secondary"><i class="fas fa-user-tie me-1"></i> ครูที่ปรึกษา</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="text" id="advUsernameInput" class="form-control text-center rounded-pill mb-2" placeholder="Username">
+          <input type="password" id="advPasswordInput" class="form-control text-center rounded-pill mb-2" placeholder="Password" onkeydown="if(event.key==='Enter') loginAdvisor()">
+          <button onclick="loginAdvisor()" class="btn btn-secondary w-100 rounded-pill">เข้าสู่ระบบ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- UPLOAD DOC MODAL -->
+  <div class="modal fade" id="uploadDocModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content rounded-4 border-0">
+        <div class="modal-header bg-success text-white border-0">
+          <h6 class="modal-title"><i class="fas fa-file-upload me-2"></i>อัปโหลดเอกสาร</h6>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="uploadDocForm" onsubmit="handleUploadDocSubmit(this); return false;">
+            <!-- ประเภทเอกสาร -->
+            <div class="mb-3">
+              <label class="form-label small fw-bold text-secondary">ประเภทเอกสาร</label>
+              <div class="btn-group w-100" role="group">
+                <input type="radio" class="btn-check" name="ud_type" id="ud_type_borrow" value="borrow" checked>
+                <label class="btn btn-outline-success fw-bold" for="ud_type_borrow"><i class="fas fa-file-contract me-1"></i>เอกสารการยืม</label>
+                <input type="radio" class="btn-check" name="ud_type" id="ud_type_return" value="return">
+                <label class="btn btn-outline-warning text-dark fw-bold" for="ud_type_return"><i class="fas fa-undo me-1"></i>เอกสารการคืน</label>
+              </div>
+            </div>
+            <!-- ประเภทผู้ใช้ -->
+            <div class="mb-2">
+              <label class="form-label small fw-bold text-secondary">ประเภทผู้ใช้</label>
+              <div class="btn-group w-100" role="group">
+                <input type="radio" class="btn-check" name="ud_personType" id="ud_pt_student" value="student" checked onchange="onUploadPersonTypeChange()">
+                <label class="btn btn-outline-primary fw-bold" for="ud_pt_student"><i class="fas fa-user-graduate me-1"></i>นักเรียน</label>
+                <input type="radio" class="btn-check" name="ud_personType" id="ud_pt_teacher" value="teacher" onchange="onUploadPersonTypeChange()">
+                <label class="btn btn-outline-info fw-bold" for="ud_pt_teacher"><i class="fas fa-chalkboard-teacher me-1"></i>ครู</label>
+              </div>
+            </div>
+            <!-- ระดับชั้น -->
+            <div class="mb-2" id="ud_levelSection">
+              <label class="form-label small fw-bold text-secondary">ระดับชั้น</label>
+              <select id="ud_levelSelect" class="form-select rounded-3" onchange="onUploadLevelChange()">
+                <option value="">— เลือกระดับชั้น —</option>
+                <option value="รายชื่อนักเรียน ม.3">ม.3</option>
+                <option value="รายชื่อนักเรียน ม.4">ม.4</option>
+                <option value="รายชื่อนักเรียน ม.5">ม.5</option>
+                <option value="รายชื่อนักเรียน ม.6">ม.6</option>
+              </select>
+            </div>
+            <!-- ห้องเรียน -->
+            <div class="mb-2" id="ud_roomSection" style="display:none;">
+              <label class="form-label small fw-bold text-secondary">ห้องเรียน</label>
+              <select id="ud_roomSelect" class="form-select rounded-3" onchange="filterUploadPersonList()">
+                <option value="">— ทุกห้อง —</option>
+              </select>
+            </div>
+            <!-- ค้นหา/เลือกชื่อ -->
+            <div class="mb-3">
+              <label class="form-label small fw-bold text-secondary">ค้นหา / เลือกชื่อ</label>
+              <input type="text" id="ud_searchName" class="form-control rounded-pill mb-2" placeholder="พิมพ์ชื่อหรือรหัส..." oninput="filterUploadPersonList()">
+              <select id="ud_personSelect" class="form-select" required>
+                <option value="">— เลือกชื่อ —</option>
+              </select>
+            </div>
+            <!-- ไฟล์ -->
+            <div class="mb-3">
+              <label class="form-label small fw-bold text-secondary">ไฟล์เอกสาร <span class="text-danger">(PDF เท่านั้น)</span></label>
+              <input type="file" class="form-control" name="ud_file" accept="application/pdf" required>
+            </div>
+            <!-- หมายเหตุ -->
+            <div class="mb-1">
+              <label class="form-label small text-secondary">หมายเหตุ (ถ้ามี)</label>
+              <textarea class="form-control" name="ud_note" rows="2" placeholder="หมายเหตุเพิ่มเติม..."></textarea>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer border-0 pt-0">
+          <button type="button" class="btn btn-light rounded-pill flex-fill" data-bs-dismiss="modal">ยกเลิก</button>
+          <button type="submit" form="uploadDocForm" class="btn btn-success rounded-pill flex-fill fw-bold">
+            <i class="fas fa-cloud-upload-alt me-1"></i> อัปโหลด
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACTION MODAL -->
+  <div class="modal fade" id="actionModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content rounded-4 border-0 shadow">
+        <div class="modal-header bg-primary text-white border-0">
+          <h5 class="modal-title fs-6"><i class="fas fa-edit me-2"></i>อัปโหลดเอกสาร</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body bg-light">
+          <form id="updateForm" onsubmit="handleFormSubmit(this); return false;">
+            <input type="hidden" name="userId"   id="m_userId">
+            <input type="hidden" name="userType" id="m_userType">
+            <input type="hidden" name="userRoom" id="m_userRoom">
+            <input type="hidden" name="userName" id="m_userName">
+            <input type="hidden" id="m_sourceSheet">
+            <div class="bg-white p-3 rounded-3 shadow-sm mb-3 text-center">
+              <h5 id="m_displayName" class="fw-bold mb-1 text-dark">...</h5>
+              <div class="mt-2">
+                <label class="small text-muted mb-1 d-flex align-items-center justify-content-center gap-1">
+                  <i class="fas fa-barcode"></i> Serial Number iPad
+                  <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem;" id="m_serial_hint">10 ตัวอักษร</span>
+                </label>
+                <div class="input-group input-group-sm mx-auto" style="max-width:260px;">
+                  <input type="text" class="form-control text-center fw-bold text-primary font-monospace"
+                         name="userSerial" id="m_userSerial_input"
+                         maxlength="10" autocomplete="off"
+                         placeholder="กรอก Serial 10 ตัว"
+                         style="letter-spacing:.08em; font-size:1rem;"
+                         oninput="updateSerialCounter(this)">
+                  <span class="input-group-text" id="m_serial_counter" style="font-size:.75rem; min-width:42px;">0/10</span>
+                </div>
+                <div id="m_serial_msg" class="small mt-1" style="min-height:1.2em;"></div>
+              </div>
+              <div class="mt-2 d-flex justify-content-center gap-2">
+                <span id="m_borrow_badge" class="badge bg-secondary">...</span>
+                <span id="m_doc_badge" class="badge bg-secondary">...</span>
+              </div>
+            </div>
+            <div class="card border-0 shadow-sm mb-3">
+              <div class="card-body">
+                <h6 class="fw-bold text-muted mb-3 small text-uppercase">เอกสารที่มีอยู่</h6>
+                <div id="m_doc_links" class="mb-0"></div>
+              </div>
+            </div>
+            <div class="card border-0 shadow-sm mb-3">
+              <div class="card-body">
+                <div class="mb-3">
+                  <label class="form-label small fw-bold text-success">อัปโหลดสัญญาการยืม (PDF)</label>
+                  <input type="file" class="form-control form-control-sm" name="file_agreement" accept="application/pdf">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label small fw-bold text-warning">อัปโหลดหลักฐานการคืน (PDF/รูปภาพ)</label>
+                  <input type="file" class="form-control form-control-sm" name="file_return" accept="image/*,application/pdf">
+                </div>
+                <div>
+                  <label class="form-label small">หมายเหตุ</label>
+                  <textarea class="form-control form-control-sm" name="note" rows="2" placeholder="หมายเหตุเพิ่มเติม..."></textarea>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-light rounded-pill" data-bs-dismiss="modal">ยกเลิก</button>
+          <button type="submit" form="updateForm" class="btn btn-primary rounded-pill px-4">
+            <i class="fas fa-save me-1"></i> บันทึก
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADMIN EDIT MODAL -->
+  <div class="modal fade" id="adminEditModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content rounded-4 border-0 shadow">
+        <div class="modal-header bg-danger text-white border-0">
+          <h5 class="modal-title fs-6"><i class="fas fa-cog me-2"></i>แก้ไขข้อมูล (Admin)</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="adm_id">
+          <input type="hidden" id="adm_name_hidden">
+          <input type="hidden" id="adm_type">
+          <div class="bg-light rounded-3 p-3 mb-3">
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label small fw-bold text-muted">ชื่อ-นามสกุล</label>
+                <input type="text" id="adm_name" class="form-control form-control-sm" readonly style="background:#fff;">
+              </div>
+              <div class="col-3">
+                <label class="form-label small fw-bold text-muted">ห้อง</label>
+                <input type="text" id="adm_room" class="form-control form-control-sm" readonly style="background:#fff;">
+              </div>
+              <div class="col-3">
+                <label class="form-label small fw-bold text-muted">Serial</label>
+                <select id="adm_serial" class="form-select form-select-sm border-primary" style="background:#fff;"></select>
+              </div>
+            </div>
+          </div>
+          <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+              <h6 class="fw-bold text-muted mb-3 small"><i class="fas fa-edit me-1"></i>เปลี่ยนสถานะ</h6>
+              <div class="row g-2">
+                <div class="col-6">
+                  <label class="form-label small fw-bold">สถานะเครื่อง</label>
+                  <select id="adm_borrow_status" class="form-select form-select-sm">
+                    <option value="ยังไม่ยืม">ยังไม่ยืม</option>
+                    <option value="ยืมอยู่">ยืมอยู่</option>
+                    <option value="อยู่ระหว่างการส่งคืน">อยู่ระหว่างการส่งคืน</option>
+                    <option value="คืนแล้ว">✅ คืนแล้ว</option>
+                    <option value="ส่งซ่อม">🔧 ส่งซ่อม</option>
+                    <option value="สละสิทธิ์">สละสิทธิ์</option>
+                  </select>
+                </div>
+                <div class="col-6">
+                  <label class="form-label small fw-bold">สถานะเอกสาร</label>
+                  <select id="adm_doc_status" class="form-select form-select-sm">
+                    <option value="">-- ไม่เปลี่ยน --</option>
+                    <option value="ยังไม่ส่ง">ยังไม่ส่ง</option>
+                    <option value="รอตรวจสอบ">รอตรวจสอบ</option>
+                    <option value="เอกสารผ่าน">✅ เอกสารผ่าน</option>
+                    <option value="เอกสารไม่ผ่าน">❌ เอกสารไม่ผ่าน</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+              <h6 class="fw-bold text-muted mb-2 small"><i class="fas fa-paperclip me-1"></i>เอกสาร</h6>
+              <div class="mb-2" id="adm_file_list"></div>
+              <div id="adm_return_file_list"></div>
+            </div>
+          </div>
+          <div>
+            <label class="form-label small fw-bold">หมายเหตุ</label>
+            <textarea id="adm_note" class="form-control form-control-sm" rows="2" placeholder="หมายเหตุ..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer border-0 d-flex">
+          <button type="button" class="btn btn-outline-danger btn-sm rounded-pill me-auto"
+            onclick="var id=document.getElementById('adm_id').value; var name=document.getElementById('adm_name').value; var p=systemData.find(function(x){return String(x.id)===String(id);}); confirmDeleteUser(id, p?p.source_sheet:'', name);">
+            <i class="fas fa-trash me-1"></i>ลบ
+          </button>
+          <button type="button" class="btn btn-light rounded-pill" data-bs-dismiss="modal">ยกเลิก</button>
+          <button type="button" class="btn btn-danger rounded-pill px-4" onclick="saveAdminData()">
+            <i class="fas fa-save me-1"></i> บันทึก
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADVISOR RETURN MODAL -->
+  <div class="modal fade" id="advisorReturnModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content rounded-4 border-0 shadow">
+        <div class="modal-header bg-warning text-dark border-0">
+          <h5 class="modal-title fs-6"><i class="fas fa-undo me-2"></i>ทำเรื่องส่งคืน iPad (ครูที่ปรึกษา)</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body bg-light">
+          <form id="advisorReturnForm" onsubmit="handleAdvisorReturnSubmit(this); return false;">
+            <input type="hidden" name="userId"    id="ar_userId">
+            <input type="hidden" name="userType"  id="ar_userType">
+            <input type="hidden" name="userRoom"  id="ar_userRoom">
+            <input type="hidden" name="userName"  id="ar_userName">
+            <input type="hidden" name="userSerial" id="ar_userSerial">
+            <div class="bg-white p-3 rounded-3 shadow-sm mb-3 text-center">
+              <h5 id="ar_showName" class="fw-bold mb-1 text-dark">...</h5>
+              <div class="small text-muted mb-2">Serial: <span id="ar_showSerial" class="text-primary fw-bold"></span></div>
+            </div>
+            <div class="card border-0 shadow-sm">
+              <div class="card-body">
+                <div class="mb-3">
+                  <label class="form-label small text-danger fw-bold">* อัปโหลดเอกสาร/รูปถ่ายการคืน</label>
+                  <input type="file" class="form-control form-control-sm" name="file_return" accept="image/*,application/pdf" required>
+                </div>
+                <div>
+                  <label class="form-label small">สภาพเครื่อง (หมายเหตุ)</label>
+                  <textarea class="form-control" name="note" rows="2" placeholder="เช่น หน้าจอแตก, สายชาร์จหาย..."></textarea>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer border-0 bg-white">
+          <button type="button" class="btn btn-light rounded-pill" data-bs-dismiss="modal">ยกเลิก</button>
+          <button type="submit" form="advisorReturnForm" class="btn btn-warning rounded-pill px-4 shadow-sm fw-bold text-dark">
+            <i class="fas fa-paper-plane me-1"></i>ส่งเรื่องคืนให้แอดมิน
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- EXPORT MODAL -->
   <div class="modal fade" id="exportModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content rounded-4 border-0">
@@ -201,406 +732,375 @@
           <div class="list-group mb-3">
             <label class="list-group-item d-flex gap-2">
               <input class="form-check-input flex-shrink-0" type="radio" name="exportScope" value="all" checked>
-              <span>
-                ข้อมูลทั้งหมด
-                <small class="d-block text-muted">ทุกระดับชั้น ทุกห้อง (Database ทั้งหมด)</small>
-              </span>
+              <span>ข้อมูลทั้งหมด <small class="d-block text-muted">ทุกระดับชั้น ทุกห้อง</small></span>
             </label>
             <label class="list-group-item d-flex gap-2">
               <input class="form-check-input flex-shrink-0" type="radio" name="exportScope" value="filtered">
-              <span>
-                เฉพาะที่กรองอยู่
-                <small class="d-block text-primary" id="exportFilterText">ตามที่เลือกในหน้า Admin</small>
-              </span>
+              <span>เฉพาะที่กรองอยู่ <small class="d-block text-primary" id="exportFilterText">ตามที่เลือกในหน้า Admin</small></span>
             </label>
           </div>
-
           <h6 class="fw-bold text-muted mb-2">2. เลือกคอลัมน์</h6>
           <div class="card bg-light border-0 p-3">
             <div class="row g-2">
-              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_id" checked disabled><label class="form-check-label">รหัสประจำตัว</label></div></div>
-              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_name" checked disabled><label class="form-check-label">ชื่อ-นามสกุล</label></div></div>
-              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_status" checked><label class="form-check-label">สถานะเครื่อง</label></div></div>
-              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_doc" checked><label class="form-check-label">สถานะเอกสาร</label></div></div>
-              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_level" checked><label class="form-check-label">ระดับชั้น</label></div></div>
-              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_room" checked><label class="form-check-label">ห้อง</label></div></div>
-              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_serial"><label class="form-check-label">Serial Number</label></div></div>
-              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_note"><label class="form-check-label">หมายเหตุ</label></div></div>
+              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_id" checked disabled><label class="form-check-label small">รหัสประจำตัว</label></div></div>
+              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_name" checked disabled><label class="form-check-label small">ชื่อ-นามสกุล</label></div></div>
+              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_status" checked><label class="form-check-label small">สถานะเครื่อง</label></div></div>
+              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_doc" checked><label class="form-check-label small">สถานะเอกสาร</label></div></div>
+              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_level" checked><label class="form-check-label small">ระดับชั้น</label></div></div>
+              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_room" checked><label class="form-check-label small">ห้อง</label></div></div>
+              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_serial"><label class="form-check-label small">Serial Number</label></div></div>
+              <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="col_note"><label class="form-check-label small">หมายเหตุ</label></div></div>
             </div>
           </div>
         </div>
         <div class="modal-footer border-0">
           <button type="button" class="btn btn-light rounded-pill" data-bs-dismiss="modal">ยกเลิก</button>
-          <button type="button" class="btn btn-success rounded-pill px-4 shadow" onclick="executeExport()">
-            <i class="fas fa-download me-1"></i> ดาวน์โหลดไฟล์ Excel/CSV
+          <button type="button" class="btn btn-success rounded-pill px-4" onclick="executeExport()">
+            <i class="fas fa-download me-1"></i> ดาวน์โหลด CSV
           </button>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="modal fade" id="reportModal" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable"> <div class="modal-content rounded-4 border-0">
+  <!-- REPORT MODAL -->
+  <div class="modal fade" id="reportModalProgress" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content rounded-4 border-0">
         <div class="modal-header bg-primary text-white border-0">
           <h5 class="modal-title"><i class="fas fa-chart-pie me-2"></i>รายงานสรุปความคืบหน้า</h5>
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body p-0">
           <div class="table-responsive">
-            <table class="table table-bordered table-hover align-middle mb-0 text-center" style="font-size: 0.85rem;">
+            <table class="table table-bordered table-hover align-middle mb-0 text-center" style="font-size:0.85rem;">
               <thead class="table-light sticky-top">
                 <tr>
-                  <th class="py-3">ระดับ/ห้อง</th>
+                  <th class="py-3 text-start">ระดับ/ห้อง</th>
                   <th class="py-3">นร.ทั้งหมด</th>
-                  <th class="py-3 bg-success bg-opacity-10 text-success border-success">
-                    <i class="fas fa-tablet-alt"></i> การยืมสำเร็จ
-                  </th>
-                  <th class="py-3 bg-warning bg-opacity-10 text-dark border-warning">
-                    <i class="fas fa-file-alt"></i> เอกสารผ่าน
-                  </th>
+                  <th class="py-3 bg-success bg-opacity-10 text-success"><i class="fas fa-tablet-alt"></i> ยืมสำเร็จ</th>
+                  <th class="py-3 bg-warning bg-opacity-10 text-warning"><i class="fas fa-file-alt"></i> เอกสารผ่าน</th>
+                  <th class="py-3 bg-info bg-opacity-10 text-info"><i class="fas fa-file-upload"></i> ส่งเอกสารแล้ว</th>
                   <th class="d-none d-md-table-cell text-muted">ยังไม่ยืม</th>
                   <th class="d-none d-md-table-cell text-primary">คืนแล้ว</th>
                   <th class="d-none d-md-table-cell text-danger">ซ่อม/สละ</th>
                 </tr>
               </thead>
-              <tbody id="reportTableBody">
-                </tbody>
+              <tbody id="reportTableBodyProgress"></tbody>
             </table>
           </div>
         </div>
         <div class="modal-footer border-0">
-           <small class="text-muted me-auto">* % การยืม = (ยืมอยู่ + คืนแล้ว + ส่งซ่อม) / ทั้งหมด</small>
-           <button type="button" class="btn btn-secondary rounded-pill" data-bs-dismiss="modal">ปิด</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal fade" id="reportModal" tabindex="-1">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable"> <div class="modal-content rounded-4 border-0">
-        <div class="modal-header bg-primary text-white border-0">
-          <h5 class="modal-title"><i class="fas fa-chart-bar me-2"></i>สรุปยอดแยกห้อง</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <div class="table-responsive">
-            <table class="table table-bordered table-sm text-center align-middle" style="font-size: 0.9rem;">
-              <thead class="table-light">
-                <tr>
-                  <th class="text-start">ระดับชั้น/ห้อง</th>
-                  <th>ทั้งหมด</th>
-                  <th class="text-secondary">ยังไม่ยืม</th>
-                  <th class="text-success">ยืมอยู่</th>
-                  <th class="text-primary">คืนแล้ว</th>
-                  <th class="text-danger">ซ่อม/สละ</th>
-                </tr>
-              </thead>
-              <tbody id="reportTableBody">
-                </tbody>
-            </table>
-          </div>
-        </div>
-        <div class="modal-footer border-0">
+          <small class="text-muted me-auto">* % การยืม = (ยืมอยู่ + คืนแล้ว + ส่งซ่อม) / ทั้งหมด &nbsp;|&nbsp; <span class="text-info">ส่งเอกสารแล้ว</span> = รอตรวจ + ผ่านแล้ว</small>
           <button type="button" class="btn btn-secondary rounded-pill" data-bs-dismiss="modal">ปิด</button>
         </div>
       </div>
     </div>
   </div>
 
-  <div id="admin-float-btn" class="position-fixed bottom-0 end-0 p-3" style="z-index: 1030">
-    <button class="btn btn-secondary rounded-circle shadow" onclick="showAdminLogin()" style="width: 50px; height: 50px;">
-      <i class="fas fa-cog"></i>
-    </button>
-  </div>
-
-  <div class="modal fade" id="adminLoginModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-sm">
-      <div class="modal-content rounded-4 border-0">
-        <div class="modal-header bg-dark text-white border-0">
-          <h6 class="modal-title"><i class="fas fa-lock"></i> Admin Access</h6>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <input type="text" id="adminUsernameInput" class="form-control text-center rounded-pill mb-2" placeholder="Username">
-          <input type="password" id="adminPasswordInput" class="form-control text-center rounded-pill mb-2" placeholder="Password">
-          <button onclick="loginAdmin()" class="btn btn-dark w-100 rounded-pill">Login</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal fade" id="advisorLoginModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-sm">
-      <div class="modal-content rounded-4 border-0">
-        <div class="modal-header bg-light border-0">
-          <h6 class="modal-title text-secondary"><i class="fas fa-user-tie"></i> ครูที่ปรึกษา</h6>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <input type="text" id="advUsernameInput" class="form-control text-center rounded-pill mb-2" placeholder="Username">
-          <input type="password" id="advPasswordInput" class="form-control text-center rounded-pill mb-2" placeholder="Password">
-          <button onclick="loginAdvisor()" class="btn btn-secondary w-100 rounded-pill">เข้าสู่ระบบ</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal fade" id="actionModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-      <div class="modal-content rounded-4 border-0 shadow">
-        <form id="updateForm" onsubmit="handleFormSubmit(this); return false;">
-          <div class="modal-header bg-primary text-white border-0">
-            <h5 class="modal-title fs-6"><i class="fas fa-edit me-2"></i>แก้ไขข้อมูล</h5>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-          </div>
-          <div class="modal-body bg-light">
-            <input type="hidden" name="userId" id="m_userId">
-            <input type="hidden" name="userType" id="m_userType">
-            <input type="hidden" name="userRoom" id="m_userRoom">
-            <input type="hidden" name="userName" id="m_userName">
-            
-            <div class="bg-white p-3 rounded-3 shadow-sm mb-3 text-center">
-              <h5 id="m_displayName" class="fw-bold mb-1 text-dark">...</h5>
-              <div class="mt-2">
-                <label class="small text-muted mb-1">Serial Number</label>
-                <input type="text" class="form-control text-center fw-bold text-primary" name="userSerial" id="m_userSerial_input">
-              </div>
-              <div class="mt-2 d-flex justify-content-center gap-2">
-                 <span id="m_borrow_badge" class="badge bg-secondary">...</span>
-                 <span id="m_doc_badge" class="badge bg-secondary">...</span>
-              </div>
-            </div>
-
-            <div class="card border-0 shadow-sm mb-3">
-              <div class="card-body">
-                <label class="form-label small text-muted fw-bold">สถานะเครื่อง</label>
-                <select class="form-select text-center fw-bold" name="statusSelect" required>
-                  <option value="ยังไม่ยืม">⚪ ยังไม่ยืม</option>
-                  <option value="ยืมอยู่">✅ ยืมอยู่</option>
-                  <option value="คืนแล้ว">📥 คืนแล้ว</option>
-                  <option value="ส่งซ่อม">🛠 ส่งซ่อม</option>
-                  <option value="สละสิทธิ์">⛔ สละสิทธิ์</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="card border-0 shadow-sm">
-              <div class="card-header bg-white fw-bold small text-muted">เอกสารแนบ</div>
-              <div class="card-body">
-                <div class="mb-3">
-                  <label class="form-label small">1. สัญญาการยืม</label>
-                  <input type="file" class="form-control form-control-sm" name="file_agreement" accept="image/*,application/pdf">
-                </div>
-                <div id="studentFields" style="display:none;">
-                  <div class="mb-3">
-                    <label class="form-label small">2. บัตร ปชช. นร.</label>
-                    <input type="file" class="form-control form-control-sm" name="file_card_std">
-                  </div>
-                  <div class="mb-3">
-                    <label class="form-label small">3. บัตร ปชช. ผปค.</label>
-                    <input type="file" class="form-control form-control-sm" name="file_card_parent">
-                  </div>
-                  <div class="mb-3">
-                    <label class="form-label small">4. ทะเบียนบ้าน</label>
-                    <input type="file" class="form-control form-control-sm" name="file_house">
-                  </div>
-                  <div class="mb-3">
-                    <label class="form-label small">5. เบอร์ ผปค.</label>
-                    <input type="tel" class="form-control form-control-sm" name="parent_phone" placeholder="08x-xxx-xxxx">
-                  </div>
-                </div>
-                <div class="mt-2">
-                  <label class="form-label small">หมายเหตุ</label>
-                  <textarea class="form-control" name="note" rows="2"></textarea>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="modal-footer border-0 bg-white">
-            <button type="button" class="btn btn-light rounded-pill" data-bs-dismiss="modal">ยกเลิก</button>
-            <button type="submit" id="btnSubmit" class="btn btn-primary rounded-pill px-4 shadow-sm">บันทึก</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal fade" id="adminEditModal" tabindex="-1">
-    <div class="modal-dialog">
-      <div class="modal-content rounded-4 border-0">
-        <div class="modal-header bg-danger text-white border-0">
-          <h5 class="modal-title">Admin Action</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <form id="adminForm" onsubmit="return false;">
-            <input type="hidden" id="adm_id">
-            <input type="hidden" id="adm_name_hidden">
-            <input type="hidden" id="adm_type">
-            <input type="hidden" id="adm_room">
-            
-            <div class="alert alert-secondary mb-3 small">
-              <strong><i class="fas fa-file-alt"></i> เอกสาร:</strong>
-              <div id="adm_file_list" class="mt-2 d-flex flex-wrap gap-2"></div>
-            </div>
-            
-            <div class="mb-3">
-              <label class="form-label small">ชื่อ</label>
-              <input type="text" id="adm_name" class="form-control" readonly>
-            </div>
-            <div class="mb-3">
-              <label class="form-label small">Serial</label>
-              <input type="text" id="adm_serial" class="form-control fw-bold">
-            </div>
-            
-            <div class="row">
-               <div class="col-6 mb-3">
-                  <label class="form-label small text-primary fw-bold">1. เครื่อง</label>
-                  <select id="adm_borrow_status" class="form-select form-select-sm fw-bold border-primary">
-                    <option value="ยังไม่ยืม">⚪ ยังไม่ยืม</option>
-                    <option value="ยืมอยู่">✅ ยืมอยู่</option>
-                    <option value="คืนแล้ว">📥 คืนแล้ว</option>
-                    <option value="ส่งซ่อม">🛠 ส่งซ่อม</option>
-                    <option value="สละสิทธิ์">⛔ สละสิทธิ์</option>
-                  </select>
-               </div>
-               <div class="col-6 mb-3">
-                  <label class="form-label small text-warning fw-bold">2. เอกสาร</label>
-                  <select id="adm_doc_status" class="form-select form-select-sm fw-bold border-warning">
-                    <option value="">(ไม่เปลี่ยน)</option>
-                    <option value="เอกสารผ่าน">✅ เอกสารผ่าน</option>
-                    <option value="เอกสารไม่ผ่าน">❌ ไม่ผ่าน</option>
-                    <option value="รอตรวจสอบ">🟠 รอตรวจสอบ</option>
-                    <option value="ยังไม่ส่ง">⚪ ยังไม่ส่ง</option>
-                  </select>
-               </div>
-            </div>
-            <div class="mb-3">
-              <label class="form-label small">Note</label>
-              <textarea id="adm_note" class="form-control" rows="2"></textarea>
-            </div>
-          </form>
-        </div>
-        <div class="modal-footer border-0">
-          <button type="button" class="btn btn-light rounded-pill" data-bs-dismiss="modal">ปิด</button>
-          <button type="button" class="btn btn-danger rounded-pill px-4" onclick="saveAdminData()">บันทึก</button>
-        </div>
-      </div>
-    </div>
-  </div>
-  
-  <div class="modal fade" id="adminAddUserModal" tabindex="-1">
-    <div class="modal-dialog">
-      <div class="modal-content rounded-4 border-0">
-        <div class="modal-header bg-success text-white border-0">
-          <h5 class="modal-title">เพิ่มรายชื่อ</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <form id="addUserForm" onsubmit="return false;">
-            <div class="mb-3">
-              <label class="form-label">เลือกกลุ่ม</label>
-              <select id="new_targetSheet" class="form-select" onchange="toggleNewUserFields()">
-                <option value="รายชื่อนักเรียน ม.3">รายชื่อนักเรียน ม.3</option>
-                <option value="รายชื่อนักเรียน ม.4">รายชื่อนักเรียน ม.4</option>
-                <option value="รายชื่อนักเรียน ม.5">รายชื่อนักเรียน ม.5</option>
-                <option value="รายชื่อนักเรียน ม.6">รายชื่อนักเรียน ม.6</option>
-                <option value="รายชื่อครู">รายชื่อครู</option>
-              </select>
-            </div>
-            <div class="mb-3">
-              <label class="form-label">ชื่อ - นามสกุล</label>
-              <input type="text" id="new_name" class="form-control" required>
-            </div>
-            <div id="new_studentFields">
-              <div class="row">
-                <div class="col-6 mb-3">
-                  <label class="form-label">รหัส</label>
-                  <input type="text" id="new_id" class="form-control">
-                </div>
-                <div class="col-6 mb-3">
-                  <label class="form-label">ห้อง</label>
-                  <input type="number" id="new_room" class="form-control">
-                </div>
-              </div>
-            </div>
-          </form>
-        </div>
-        <div class="modal-footer border-0">
-          <button type="button" class="btn btn-success rounded-pill px-4" onclick="saveNewUser()">บันทึก</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
-  <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap5.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <?!= include('JavaScript'); ?>
-
-  <div class="modal fade" id="auditModal" tabindex="-1">
+  <!-- AUDIT MODAL MISSING -->
+  <div class="modal fade" id="auditModalMissing" tabindex="-1">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
       <div class="modal-content rounded-4 border-0">
         <div class="modal-header bg-warning text-dark border-0">
-          <h5 class="modal-title fw-bold"><i class="fas fa-exclamation-triangle me-2"></i>รายชื่อที่ไม่มีในทะเบียนทรัพย์สิน</h5>
+          <h5 class="modal-title fw-bold"><i class="fas fa-exclamation-triangle me-2"></i>รายชื่อที่หาเจ้าของไม่เจอ</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body p-0">
           <div class="alert alert-light border-0 mb-0 small text-muted p-3">
-            <i class="fas fa-info-circle me-1"></i> รายชื่อเหล่านี้มีอยู่ในระบบนักเรียน/ครู <strong>แต่ไม่พบชื่อในชีต "รายงานทะเบียนทรัพย์สิน"</strong>
+            <i class="fas fa-info-circle me-1"></i> รายชื่อในชีต <strong>รายงานทะเบียนทรัพย์สิน</strong> ที่ไม่พบในระบบ (อาจสะกดผิดหรือต้องจับคู่)
           </div>
           <div class="table-responsive">
-            <table class="table table-striped table-hover align-middle mb-0 text-center" style="font-size: 0.9rem;">
+            <table class="table table-striped table-hover align-middle mb-0 text-center" style="font-size:0.9rem;">
               <thead class="table-dark sticky-top">
-                <tr>
-                  <th>ระดับชั้น</th>
-                  <th>ห้อง</th>
-                  <th>ชื่อ-นามสกุล</th>
-                  <th>สถานะปัจจุบัน</th>
-                </tr>
+                <tr><th>ระดับชั้น</th><th>ห้อง</th><th>ชื่อ-นามสกุล</th><th>Serial</th></tr>
               </thead>
-              <tbody id="auditTableBody"></tbody>
+              <tbody id="auditTableBodyMissing"></tbody>
             </table>
           </div>
         </div>
         <div class="modal-footer border-0">
           <span class="me-auto fw-bold text-danger" id="auditCountText"></span>
+          <button type="button" class="btn btn-warning rounded-pill px-3" onclick="openMappingModalFromMissing()"><i class="fas fa-link me-1"></i>จับคู่ชื่อ</button>
           <button type="button" class="btn btn-secondary rounded-pill" data-bs-dismiss="modal">ปิด</button>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="modal fade" id="auditModal" tabindex="-1">
-  <div class="modal-dialog modal-xl modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header bg-warning text-dark">
-        <h5 class="modal-title fw-bold"><i class="fas fa-link me-2"></i>จับคู่รายชื่อตกหล่น (Name Mapping)</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body p-0 bg-light">
-        <div class="alert alert-warning border-0 rounded-0 mb-0 small">
-          <i class="fas fa-info-circle me-1"></i> 
-          รายชื่อด้านซ้ายคือ <strong>"ชื่อในทะเบียนทรัพย์สิน"</strong> (ที่ยังหาเจ้าของไม่เจอ)<br>
-          ระบบค้นหา <strong>"ชื่อที่ถูกต้อง"</strong> มาให้แล้ว กรุณา <strong>ติ๊กถูก <i class="far fa-check-square"></i> หน้าชื่อ</strong> แล้วกดปุ่ม <strong>"บันทึกรายการที่เลือก"</strong> ด้านบน
+  <!-- AUDIT MODAL MAPPING -->
+  <div class="modal fade" id="auditModalMapping" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header bg-warning text-dark">
+          <h5 class="modal-title fw-bold"><i class="fas fa-link me-2"></i>จับคู่รายชื่อตกหล่น</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <div class="table-responsive">
-          <table class="table table-bordered table-hover align-middle mb-0 bg-white" style="font-size: 0.9rem;">
-            <thead class="table-light sticky-top">
-              <tr class="text-center text-secondary">
-                <th style="width: 5%;">เลือก</th> <th style="width: 35%;">ข้อมูลในทะเบียนทรัพย์สิน (ผิด)</th> <th style="width: 45%;">ชื่อในระบบที่ถูกต้อง (เลือกใหม่)</th>
-                <th style="width: 15%;">สถานะ</th>
-              </tr>
-            </thead>
-            <tbody id="auditTableBody">
-               </tbody>
-          </table>
+        <div class="modal-body p-0 bg-light">
+          <div class="alert alert-warning border-0 rounded-0 mb-0 small">
+            <i class="fas fa-info-circle me-1"></i>
+            เลือกชื่อที่ถูกต้องจาก dropdown แล้วกด <strong>"บันทึกการจับคู่"</strong>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-bordered table-hover align-middle mb-0 bg-white" style="font-size:0.9rem;">
+              <thead class="table-light sticky-top">
+                <tr class="text-center text-secondary">
+                  <th style="width:5%;">เลือก</th>
+                  <th style="width:30%;">ชื่อในทะเบียนทรัพย์สิน</th>
+                  <th style="width:40%;">จับคู่กับชื่อที่ถูกต้อง</th>
+                  <th style="width:15%;">Serial</th>
+                  <th style="width:10%;">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody id="auditTableBodyMapping"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <span class="me-auto small text-muted" id="mappingCountText">0 รายการ</span>
+          <button type="button" class="btn btn-secondary rounded-pill" data-bs-dismiss="modal">ปิด</button>
+          <button type="button" class="btn btn-warning rounded-pill px-4" onclick="saveMappingSelections()"><i class="fas fa-save me-1"></i>บันทึกการจับคู่</button>
         </div>
       </div>
     </div>
   </div>
+
+    <div class="modal fade" id="advisorAddStudentModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content rounded-4 border-0 shadow">
+      <div class="modal-header border-0 text-white" style="background: linear-gradient(135deg,#198754,#0d6efd);">
+        <div>
+          <h6 class="modal-title fw-bold mb-0">
+            <i class="fas fa-user-plus me-2"></i>เพิ่มนักเรียนในห้องของฉัน
+          </h6>
+          <small class="opacity-75" id="advisorAdd_sheetLabel">-</small>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-3">
+        <input type="hidden" id="advisorAdd_targetSheet">
+        <input type="hidden" id="advisorAdd_room">
+
+        <!-- รหัสนักเรียน -->
+        <div class="mb-3">
+          <label class="form-label small fw-bold text-dark">
+            <i class="fas fa-id-card text-primary me-1"></i>รหัสนักเรียน <span class="text-danger">*</span>
+          </label>
+          <input type="text" id="advisorAdd_id" class="form-control form-control-lg rounded-3 fw-bold"
+                 placeholder="เช่น 37001, 65001" inputmode="numeric"
+                 onkeydown="if(event.key==='Enter') document.getElementById('advisorAdd_name').focus()">
+        </div>
+
+        <!-- ชื่อ-นามสกุล -->
+        <div class="mb-3">
+          <label class="form-label small fw-bold text-dark">
+            <i class="fas fa-user text-success me-1"></i>ชื่อ-นามสกุล <span class="text-danger">*</span>
+          </label>
+          <input type="text" id="advisorAdd_name" class="form-control form-control-lg rounded-3"
+                 placeholder="เช่น นายสมชาย ใจดี"
+                 onkeydown="if(event.key==='Enter') document.getElementById('advisorAdd_serial').focus()">
+        </div>
+
+        <!-- Serial Number -->
+        <div class="mb-2">
+          <label class="form-label small fw-bold text-dark">
+            <i class="fas fa-barcode text-secondary me-1"></i>Serial Number iPad
+            <span class="badge bg-light text-secondary border ms-1" style="font-size:.7rem;font-weight:400;">ไม่บังคับ</span>
+          </label>
+          <input type="text" id="advisorAdd_serial" class="form-control rounded-3 font-monospace"
+                 placeholder="เช่น DMPHCXXQ5XQ2 หรือเว้นว่างหากยังไม่ทราบ"
+                 style="font-size:.92rem; letter-spacing:.04em"
+                 onkeydown="if(event.key==='Enter') saveAdvisorAddStudent()">
+          <div class="form-text small text-muted mt-1">
+            <i class="fas fa-info-circle me-1"></i>กรอก Serial เพื่อผูกเครื่องกับนักเรียน (แก้ไขภายหลังได้)
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer border-0 pt-0 pb-3">
+        <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">ยกเลิก</button>
+        <button type="button" class="btn btn-success rounded-pill px-4 fw-bold shadow-sm" onclick="saveAdvisorAddStudent()">
+          <i class="fas fa-user-plus me-1"></i>เพิ่มรายชื่อ
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
+
+<!-- ✅ ADVISOR: Modal แก้ไขข้อมูลนักเรียน -->
+<div class="modal fade" id="advisorStudentEditModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content rounded-4 border-0 shadow">
+      <div class="modal-header border-0" style="background: linear-gradient(135deg,#fd7e14,#dc3545); color:white;">
+        <h6 class="modal-title fw-bold">
+          <i class="fas fa-user-edit me-2"></i>แก้ไขข้อมูลนักเรียน
+        </h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="advisorEdit_origId">
+        <input type="hidden" id="advisorEdit_origSheet">
+
+        <div class="mb-3">
+          <label class="form-label small fw-bold">รหัสนักเรียน <span class="text-danger">*</span></label>
+          <input type="text" id="advisorEdit_id" class="form-control rounded-3"
+                 placeholder="รหัสนักเรียน">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-bold">ชื่อ-นามสกุล <span class="text-danger">*</span></label>
+          <input type="text" id="advisorEdit_name" class="form-control rounded-3"
+                 placeholder="ชื่อ-นามสกุล">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-bold">ห้อง</label>
+          <input type="text" id="advisorEdit_room" class="form-control rounded-3"
+                 placeholder="เช่น 1, 2, 3...">
+        </div>
+
+        <div class="alert alert-warning border-0 rounded-3 py-2 small mb-0">
+          <i class="fas fa-info-circle me-1"></i>
+          การแก้ไขรหัสนักเรียนจะไม่กระทบข้อมูลการยืม-คืน iPad ที่มีอยู่แล้ว
+        </div>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">ยกเลิก</button>
+        <button type="button" class="btn btn-warning rounded-pill px-4 fw-bold text-dark" onclick="saveAdvisorEditStudent()">
+          <i class="fas fa-save me-1"></i>บันทึกการแก้ไข
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+
+  <!-- ADD USER MODAL -->
+  <div class="modal fade" id="adminAddUserModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content rounded-4 border-0">
+        <div class="modal-header bg-success text-white border-0">
+          <h6 class="modal-title"><i class="fas fa-user-plus me-2"></i>เพิ่มรายชื่อ</h6>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">เพิ่มเข้าชีต</label>
+            <select id="new_targetSheet" class="form-select" onchange="toggleNewUserFields()">
+              <option value="รายชื่อนักเรียน ม.3">นักเรียน ม.3</option>
+              <option value="รายชื่อนักเรียน ม.4">นักเรียน ม.4</option>
+              <option value="รายชื่อนักเรียน ม.5">นักเรียน ม.5</option>
+              <option value="รายชื่อนักเรียน ม.6">นักเรียน ม.6</option>
+              <option value="รายชื่อครู">ครู</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">ชื่อ-นามสกุล</label>
+            <input type="text" id="new_name" class="form-control" placeholder="กรอกชื่อ-นามสกุล">
+          </div>
+          <div id="new_studentFields">
+            <div class="row g-2">
+              <div class="col-6 mb-3">
+                <label class="form-label small fw-bold">รหัสนักเรียน</label>
+                <input type="text" id="new_id" class="form-control">
+              </div>
+              <div class="col-6 mb-3">
+                <label class="form-label small fw-bold">ห้อง</label>
+                <input type="number" id="new_room" class="form-control">
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-light rounded-pill" data-bs-dismiss="modal">ยกเลิก</button>
+          <button type="button" class="btn btn-success rounded-pill px-4" onclick="saveNewUser()">
+            <i class="fas fa-plus me-1"></i>เพิ่มรายชื่อ
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PREVIEW MODAL -->
+  <div class="modal fade" id="previewModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content rounded-4 border-0">
+        <div class="modal-header border-0 pb-1">
+          <h6 class="modal-title fw-bold"><i class="fas fa-eye me-2"></i>ดูเอกสาร</h6>
+          <div class="zoom-controls d-flex gap-1 me-2">
+            <button class="btn btn-sm btn-light border" onclick="zoomPreview(1.2)" title="ซูมเข้า"><i class="fas fa-search-plus"></i></button>
+            <button class="btn btn-sm btn-light border" onclick="zoomPreview(0.8)" title="ซูมออก"><i class="fas fa-search-minus"></i></button>
+            <button class="btn btn-sm btn-light border" onclick="rotatePreview()" title="หมุน"><i class="fas fa-redo"></i></button>
+            <button class="btn btn-sm btn-light border" onclick="resetPreview()" title="รีเซ็ต"><i class="fas fa-compress-arrows-alt"></i></button>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-0" style="min-height:70vh;">
+          <div id="previewIframeContainer" style="display:none;height:75vh;">
+            <iframe id="previewIframe" src="" style="width:100%;height:100%;border:none;" allowfullscreen></iframe>
+          </div>
+          <div id="imageContainer">
+            <img id="previewImage" src="" style="display:none;max-width:100%;height:auto;" alt="preview">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ ACTIVITY LOG MODAL ══════════════════ -->
+  <div class="modal fade" id="activityLogModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content rounded-4 border-0 shadow">
+        <div class="modal-header text-white border-0" style="background:linear-gradient(135deg,#0d6efd,#0a58ca);">
+          <h5 class="modal-title fs-6 fw-bold">
+            <i class="fas fa-history me-2"></i>ประวัติกิจกรรมล่าสุด
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-0">
+          <!-- filter bar -->
+          <div class="d-flex gap-2 p-2 bg-light border-bottom flex-wrap align-items-center">
+            <input type="text" id="activitySearch" class="form-control form-control-sm border-0 bg-white shadow-sm" style="max-width:220px;" placeholder="🔍 ค้นหาชื่อ/รหัส/สถานะ..." oninput="filterActivityLog(this.value)">
+            <select id="activityActionFilter" class="form-select form-select-sm border-0 bg-white shadow-sm" style="max-width:180px;" onchange="filterActivityLog()">
+              <option value="">ทุกประเภท</option>
+              <option value="USER_RETURN">ส่งคืน (นักเรียน)</option>
+              <option value="ADVISOR_RETURN">ส่งคืน (ครู)</option>
+              <option value="USER_UPDATE">อัปโหลดเอกสาร</option>
+              <option value="ADVISOR_APPROVE">ครูอนุมัติ</option>
+              <option value="ADMIN">แอดมิน</option>
+            </select>
+            <span class="text-muted small ms-auto" id="activityCountText">โหลดอยู่...</span>
+          </div>
+          <!-- list -->
+          <div id="activityLogList" style="min-height:200px;">
+            <div class="text-center py-5 text-muted">
+              <div class="spinner-border spinner-border-sm me-2"></div> กำลังโหลด...
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-0 bg-light py-2">
+          <small class="text-muted"><i class="fas fa-info-circle me-1"></i>แสดงผล 60 รายการล่าสุด (อัปเดตทุก 60 วินาที)</small>
+          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill ms-auto" onclick="loadActivityLog()">
+            <i class="fas fa-sync-alt me-1"></i>รีเฟรช
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── SCRIPTS ─────────────────────────────────── -->
+  <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap5.min.js"></script>
+  <?!= include('JavaScript'); ?>
+
+  <!-- GLOBAL LOADING OVERLAY -->
+  <div id="global-loading-overlay" class="hidden" style="position:fixed;inset:0;background:rgba(255,255,255,0.75);z-index:1050;display:flex;align-items:center;justify-content:center;">
+    <div class="text-center">
+      <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;"></div>
+      <div id="global-loading-text" class="mt-2 fw-bold text-secondary small">กำลังประมวลผล...</div>
+    </div>
+  </div>
+
 </body>
 </html>
