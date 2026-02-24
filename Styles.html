@@ -1,128 +1,495 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&display=swap');
 
+  /* ─── CSS Variables ──────────────────────────────────────── */
   :root {
-    --primary-color: #0d6efd;
-    --secondary-color: #6c757d;
-    --bg-gradient: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    --glass-bg: rgba(255, 255, 255, 0.85);
-    --glass-border: 1px solid rgba(255, 255, 255, 0.3);
+    --primary:      #0d6efd;
+    --success:      #198754;
+    --warning:      #ffc107;
+    --danger:       #dc3545;
+    --secondary:    #6c757d;
+    --info:         #0dcaf0;
+    --bg-gradient:  linear-gradient(135deg, #eef2f7 0%, #d0dff2 100%);
+    --glass-bg:     rgba(255,255,255,0.90);
+    --glass-border: 1px solid rgba(255,255,255,0.40);
+    --shadow-xs:    0 1px 4px rgba(0,0,0,0.07);
+    --shadow-sm:    0 2px 10px rgba(0,0,0,0.09);
+    --shadow-md:    0 6px 24px rgba(0,0,0,0.11);
+    --radius-sm:    8px;
+    --radius-md:    14px;
+    --radius-lg:    22px;
+    --transition:   0.2s ease;
   }
 
+  /* ─── BASE ───────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; }
   body {
-    font-family: 'Sarabun', sans-serif;
+    font-family: 'Sarabun', -apple-system, sans-serif;
     background: var(--bg-gradient);
     min-height: 100vh;
-    padding-bottom: 80px; /* เผื่อพื้นที่ให้ปุ่มลอย */
+    padding-bottom: 80px;
+    -webkit-font-smoothing: antialiased;
+    color: #212529;
   }
 
-  /* --- LANDING PAGE --- */
-  .landing-section {
-    height: 100vh;
+  /* ─── LANDING ─────────────────────────────────────────────── */
+  .landing-section { min-height:100vh; display:flex; justify-content:center; align-items:center; padding:24px 16px; }
+  .glass-card { background:var(--glass-bg); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-radius:var(--radius-lg); border:var(--glass-border); padding:44px 28px 36px; text-align:center; width:100%; max-width:400px; box-shadow:var(--shadow-md); }
+  .landing-logo { width:120px; height:auto; margin-bottom:18px; filter:drop-shadow(0 4px 8px rgba(0,0,0,.14)); transition:transform var(--transition); }
+  .landing-logo:hover { transform:scale(1.06) rotate(-1deg); }
+
+  /* ─── NAVBAR ──────────────────────────────────────────────── */
+  .custom-navbar { background:rgba(255,255,255,0.97) !important; border-bottom:1px solid rgba(0,0,0,.07); backdrop-filter:blur(8px); }
+  .navbar-logo { height:36px; width:auto; }
+  .navbar-brand span { color:#1a1a2e; font-size:1rem; font-weight:700; letter-spacing:-.3px; }
+
+  /* ─── STEP LABEL ──────────────────────────────────────────── */
+  .step-label {
     display: flex;
-    justify-content: center;
     align-items: center;
-    padding: 20px;
-  }
-
-  .glass-card {
-    background: var(--glass-bg);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border-radius: 20px;
-    border: var(--glass-border);
-    padding: 40px 20px;
-    text-align: center;
-    width: 100%;
-    max-width: 400px;
-    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
-  }
-
-  /* โลโก้หน้าแรก (ปรับให้ยืดหยุ่น) */
-  .landing-logo {
-    width: 120px; /* ขนาดพื้นฐาน */
-    height: auto;
-    margin-bottom: 20px;
-    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1));
-    transition: transform 0.3s ease;
-  }
-  .landing-logo:hover { transform: scale(1.05); }
-
-  /* --- NAVBAR --- */
-  .custom-navbar {
-    background: white !important;
-    border-bottom: 1px solid rgba(0,0,0,0.05);
-    padding-top: 10px;
-    padding-bottom: 10px;
-  }
-  
-  .navbar-logo {
-    height: 40px; /* ความสูงโลโก้ในเมนู */
-    width: auto;
-    margin-right: 10px;
-  }
-
-  .navbar-brand span {
-    color: #333;
-    font-size: 1.1rem;
+    gap: 10px;
+    font-size: .92rem;
     font-weight: 700;
+    color: #495057;
+  }
+  .step-circle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    font-size: .8rem;
+    font-weight: 700;
+    flex-shrink: 0;
   }
 
-  /* --- DASHBOARD CARDS (Responsive Grid) --- */
+  /* ─── BREADCRUMB NAV ──────────────────────────────────────── */
+  .breadcrumb-nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .breadcrumb-btn {
+    background: #fff;
+    border: 1.5px solid #dee2e6;
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: .8rem;
+    font-weight: 600;
+    color: var(--primary);
+    cursor: pointer;
+    transition: all .15s;
+    font-family: 'Sarabun', sans-serif;
+  }
+  .breadcrumb-btn:hover { background: #e8f0fe; border-color: var(--primary); }
+  .breadcrumb-sep { color: #adb5bd; font-size: .75rem; }
+  .breadcrumb-current { font-size: .85rem; font-weight: 700; color: #1a1a2e; }
+
+  /* ─── STAT BAR (Dashboard) ────────────────────────────────── */
+  .stat-bar-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px 10px;
+    text-align: center;
+    box-shadow: var(--shadow-xs);
+    border-left: 4px solid;
+  }
+  .stat-bar-num { font-size: 1.6rem; font-weight: 800; line-height: 1; }
+  .stat-bar-lbl { font-size: .7rem; color: #6c757d; font-weight: 600; margin-top: 3px; }
+
+  /* ─── LEVEL CARDS (Dashboard) ─────────────────────────────── */
   .level-card {
-    border: none;
-    border-radius: 15px;
-    padding: 20px;
+    background: #fff;
+    border-radius: var(--radius-md);
+    padding: 20px 12px;
     text-align: center;
     cursor: pointer;
-    transition: all 0.2s ease;
-    background: white;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-    height: 100%; /* ให้การ์ดสูงเท่ากันในแถว */
+    box-shadow: var(--shadow-sm);
+    transition: transform .15s, box-shadow .15s;
+    border-top: 4px solid var(--lc, var(--primary));
+    height: 100%;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+  }
+  .level-card:hover  { transform: translateY(-4px); box-shadow: var(--shadow-md); }
+  .level-card:active { transform: scale(.95); }
+  .level-icon  { font-size: 2.2rem; line-height: 1; }
+  .level-label { font-size: 1.15rem; font-weight: 800; color: #1a1a2e; }
+  .level-count { font-size: .8rem; color: #6c757d; font-weight: 600; }
+
+  /* ─── ROOM CARDS (Step 2) ─────────────────────────────────── */
+  .room-card {
+    background: #fff;
+    border-radius: var(--radius-md);
+    padding: 16px 14px 12px;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: transform .15s, box-shadow .15s;
+    height: 100%;
+    border-top: 4px solid #0d6efd;
+  }
+  .room-card:hover  { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+  .room-card:active { transform: scale(.96); }
+
+  .room-card-header {
     display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
   }
+  .room-card-number { font-size: 1.05rem; font-weight: 800; color: #1a1a2e; }
+  .room-card-total  { font-size: .75rem; color: #6c757d; font-weight: 600; }
 
-  .level-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 15px rgba(0,0,0,0.1);
-    background: #f8f9fa;
-  }
-
-  .level-card:active { transform: scale(0.95); }
-
-  .level-icon {
-    font-size: 2.5rem;
-    color: var(--primary-color);
+  .room-card-progress {
+    height: 6px;
+    background: #e9ecef;
+    border-radius: 99px;
+    overflow: hidden;
     margin-bottom: 10px;
   }
+  .room-card-progress-bar { height:100%; border-radius:99px; transition:width .5s ease; }
 
-  /* --- RESPONSIVE TWEAKS --- */
-  
-  /* มือถือ (iPhone/Android) */
-  @media (max-width: 576px) {
-    .landing-logo { width: 100px; } /* ลดขนาดโลโก้ */
-    .glass-card { padding: 30px 15px; }
-    .level-card { padding: 15px; }
-    .level-icon { font-size: 2rem; }
-    h2 { font-size: 1.5rem; }
-    
-    /* ซ่อนหัวตารางในมือถือ แล้วแสดงแบบ Card */
-    .mobile-hidden { display: none !important; }
-    
-    /* ปรับตารางให้ดูง่ายขึ้น */
-    #dataTable td { padding: 8px 5px; font-size: 0.9rem; }
-    .badge { font-size: 0.75rem; font-weight: 500; }
+  .room-card-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    text-align: center;
+  }
+  .rcs-item { display:flex; flex-direction:column; align-items:center; gap:1px; }
+  .rcs-item i    { font-size: .65rem; opacity: .6; }
+  .rcs-item span { font-size: .95rem; font-weight: 800; line-height: 1; }
+  .rcs-item small { font-size: .58rem; color: #6c757d; font-weight: 600; }
+  .rcs-borrow span    { color: #198754; }
+  .rcs-notborrow span { color: #6c757d; }
+  .rcs-doc span       { color: #0d6efd; }
+
+  .room-card-pct {
+    text-align: right;
+    font-size: .67rem;
+    color: #adb5bd;
+    margin-top: 6px;
+    font-weight: 600;
   }
 
-  /* แท็บเล็ต (iPad) */
-  @media (min-width: 577px) and (max-width: 991px) {
-    .landing-logo { width: 140px; }
+  /* ─── TABLE HEADER CARD ───────────────────────────────────── */
+  .table-header-card {
+    background: #fff;
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow-xs);
   }
 
-  .hidden { display: none !important; }
-  .fade-in { animation: fadeIn 0.5s ease-in-out; }
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  /* ─── FILTER BAR ──────────────────────────────────────────── */
+  .filter-bar {
+    background: #fff;
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    box-shadow: var(--shadow-xs);
+  }
+  .filter-search-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .filter-search-icon { position:absolute; left:12px; color:#0d6efd; font-size:.82rem; z-index:1; }
+  .filter-search-input {
+    width: 100%;
+    border: 1.5px solid #e3e8f0;
+    border-radius: 99px;
+    padding: 8px 36px 8px 34px;
+    font-size: .88rem;
+    font-family: 'Sarabun', sans-serif;
+    background: #f8f9fe;
+    color: #1a1a2e;
+    outline: none;
+    transition: border-color .15s;
+  }
+  .filter-search-input:focus { border-color: var(--primary); background: #fff; }
+  .filter-search-clear { position:absolute; right:10px; background:none; border:none; cursor:pointer; color:#adb5bd; font-size:.8rem; padding:4px; }
+  .filter-search-clear:hover { color: #6c757d; }
+  .filter-select {
+    border: 1.5px solid #e3e8f0;
+    border-radius: 99px;
+    padding: 5px 12px;
+    font-size: .8rem;
+    font-family: 'Sarabun', sans-serif;
+    background: #f8f9fe;
+    color: #495057;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    flex-shrink: 0;
+  }
+  .filter-select:focus { border-color: var(--primary); }
+
+  /* ─── MINI STATS ──────────────────────────────────────────── */
+  .mst-card {
+    border-radius: 10px;
+    padding: 10px 8px;
+    text-align: center;
+  }
+  .mst-val  { font-size: 1.3rem; font-weight: 800; line-height: 1; }
+  .mst-lbl  { font-size: .62rem; font-weight: 700; margin-top: 2px; opacity: .8; }
+  .mst-pct  { font-size: .58rem; opacity: .6; margin-top: 1px; }
+
+  /* ─── STATUS CARDS ────────────────────────────────────────── */
+  .sc-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  @media (min-width: 576px) {
+    .sc-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  .sc-card {
+    background: #fff;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    border-left: 4px solid var(--status-color, #adb5bd);
+    animation: scCardIn .2s ease both;
+    animation-delay: var(--delay, 0s);
+  }
+  @keyframes scCardIn {
+    from { opacity:0; transform:translateY(6px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+
+  /* Header strip ของ card */
+  .sc-top {
+    padding: 12px 14px 10px;
+  }
+  .sc-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #fff;
+    font-size: .72rem;
+    font-weight: 800;
+    padding: 3px 10px;
+    border-radius: 99px;
+    margin-bottom: 8px;
+    letter-spacing: .2px;
+  }
+  .sc-name {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #1a1a2e;
+    line-height: 1.3;
+    margin-bottom: 4px;
+  }
+  .sc-meta {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: .78rem;
+    color: #6c757d;
+    font-weight: 600;
+  }
+  .sc-id, .sc-room { display:flex; align-items:center; gap:4px; }
+  .sc-id i, .sc-room i { font-size: .7rem; opacity: .6; }
+
+  /* Body ของ card */
+  .sc-body {
+    padding: 10px 14px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    border-top: 1px solid #f0f0f0;
+  }
+  .sc-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .sc-field-label {
+    font-size: .75rem;
+    color: #9aa0ab;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .sc-field-label i { font-size: .7rem; }
+  .sc-field-val { font-size: .82rem; font-weight: 600; color: #495057; }
+  .sc-serial {
+    font-family: 'Courier New', monospace;
+    background: #f4f6fa;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: .8rem;
+    color: #495057;
+    letter-spacing: .3px;
+  }
+  .sc-doc-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: .75rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 99px;
+  }
+  .sc-doc-links {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding-top: 4px;
+    border-top: 1px dashed #eee;
+  }
+
+  /* ─── PDF links ───────────────────────────────────────────── */
+  .doc-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: .72rem;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: 99px;
+    text-decoration: none;
+    transition: opacity .15s;
+  }
+  .doc-pill:hover { opacity: .8; }
+  .doc-pill-borrow { background:#d1e7dd; color:#0a3622; border:1px solid #a3cfbb; }
+  .doc-pill-return  { background:#cfe2ff; color:#084298; border:1px solid #9ec5fe; }
+
+  /* ─── Footer: ปุ่มอัปโหลด ────────────────────────────────── */
+  .sc-footer {
+    padding: 8px 14px 12px;
+  }
+  .sc-upload-btn {
+    width: 100%;
+    background: linear-gradient(135deg, #e8f0fe, #dce6ff);
+    color: #0d6efd;
+    border: 1.5px solid #c2d4ff;
+    border-radius: 99px;
+    padding: 8px 16px;
+    font-size: .82rem;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'Sarabun', sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all .15s;
+  }
+  .sc-upload-btn:hover {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+    box-shadow: 0 3px 10px rgba(13,110,253,.25);
+  }
+
+  /* ─── SKELETON LOADER ─────────────────────────────────────── */
+  .skeleton-grid { display:grid; grid-template-columns:1fr; gap:10px; }
+  @media (min-width:576px) { .skeleton-grid { grid-template-columns:repeat(2,1fr); } }
+  .skeleton-card {
+    background: #fff;
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+    border-left: 4px solid #e9ecef;
+  }
+  .skeleton-line {
+    height: 12px;
+    background: linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%);
+    background-size: 200% 100%;
+    border-radius: 6px;
+    animation: shimmer 1.2s infinite;
+  }
+  .skeleton-line.w-60 { width:60%; }
+  .skeleton-line.w-40 { width:40%; }
+  .skeleton-line.w-80 { width:80%; }
+  .skeleton-line.mt-1 { margin-top:6px; }
+  .skeleton-line.mt-2 { margin-top:12px; }
+  @keyframes shimmer { to { background-position:-200% 0; } }
+
+  /* ─── EMPTY STATE ─────────────────────────────────────────── */
+  .empty-state { text-align:center; padding:48px 16px; }
+  .empty-state-icon  { font-size:3rem; opacity:.2; margin-bottom:12px; }
+  .empty-state-title { font-size:1rem; font-weight:700; color:#495057; }
+  .empty-state-sub   { font-size:.82rem; color:#adb5bd; margin-top:4px; }
+
+  /* ─── SEARCH HIGHLIGHT ────────────────────────────────────── */
+  mark { background:#fff176; padding:0 2px; border-radius:2px; }
+
+  /* ─── ADMIN PANEL ─────────────────────────────────────────── */
+  .admin-mode-btn { transition:all .2s; position:relative; }
+  .admin-mode-btn .mode-count-badge { position:absolute; top:-6px; right:-6px; background:#dc3545; color:#fff; border-radius:50px; font-size:.7rem; font-weight:700; padding:2px 6px; min-width:20px; text-align:center; box-shadow:0 2px 6px rgba(220,53,69,.4); }
+  .admin-search-box { max-width:240px; }
+  .serial-code { font-size:.72rem; color:#6c757d; background:#f4f4f4; padding:2px 5px; border-radius:4px; font-family:monospace; display:inline-block; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
+  #adminTable tr.table-warning { background:rgba(255,193,7,.12) !important; }
+  #adminTable tr.table-info    { background:rgba(13,202,240,.10) !important; }
+  #adminTable td { padding:8px 8px; }
+  .stat-card-admin { border-radius:12px; padding:10px 14px; text-align:center; background:#fff; box-shadow:0 1px 6px rgba(0,0,0,.07); }
+  .stat-card-admin h4 { margin:0; font-size:1.4rem; }
+  .stat-card-admin small { font-size:.72rem; color:#6c757d; font-weight:600; }
+  .admin-toolbar { gap:6px; }
+  @media (max-width:575px) { .admin-search-box{max-width:100%;} .mode-btn-text{display:none;} }
+
+  /* ─── TABLE (Admin DataTables) ────────────────────────────── */
+  #dataTable td, #adminTable td { vertical-align:middle; font-size:.88rem; padding:8px 10px; }
+  #adminTable thead th, #dataTable thead th { font-size:.82rem; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:var(--secondary); }
+  code.small { font-size:.75rem; color:var(--secondary); background:#f4f4f4; padding:2px 6px; border-radius:4px; font-family:'Courier New',monospace; }
+
+  /* ─── BADGES ──────────────────────────────────────────────── */
+  .badge { font-size:.74rem; font-weight:600; letter-spacing:.15px; padding:4px 9px; border-radius:6px; }
+
+  /* ─── FORMS ───────────────────────────────────────────────── */
+  .form-control, .form-select { border-radius:var(--radius-sm); font-family:'Sarabun',sans-serif; }
+  .form-control:focus, .form-select:focus { border-color:var(--primary); box-shadow:0 0 0 .2rem rgba(13,110,253,.15); }
+  .btn { border-radius:var(--radius-sm); }
+  .rounded-pill { border-radius:50px !important; }
+
+  /* ─── MODAL ───────────────────────────────────────────────── */
+  .modal-content { border:none; border-radius:var(--radius-lg); box-shadow:0 24px 60px rgba(0,0,0,.18); overflow:hidden; }
+  .modal-header { border-bottom:none; padding:16px 20px 12px; }
+  .modal-footer { border-top:none; padding:12px 20px 16px; }
+
+  /* ─── PREVIEW MODAL ───────────────────────────────────────── */
+  #imageContainer { will-change:transform; cursor:grab; display:flex; justify-content:center; padding:10px; width:100%; min-height:200px; }
+  #imageContainer:active { cursor:grabbing; }
+  .zoom-controls .btn { width:34px; height:34px; padding:0; display:inline-flex; align-items:center; justify-content:center; font-size:.8rem; }
+
+  /* ─── GLOBAL LOADING ──────────────────────────────────────── */
+  #global-loading-overlay { pointer-events:all; backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); background:rgba(255,255,255,.72); }
+
+  /* ─── ANIMATIONS ──────────────────────────────────────────── */
+  .hidden { display:none !important; }
+  .fade-in { animation:fadeIn .3s ease-out; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(5px);} to{opacity:1;transform:translateY(0);} }
+
+  /* ─── SCROLL BAR ──────────────────────────────────────────── */
+  ::-webkit-scrollbar { width:5px; height:5px; }
+  ::-webkit-scrollbar-track { background:#f0f0f0; }
+  ::-webkit-scrollbar-thumb { background:#c4c4c4; border-radius:3px; }
+
+  /* ─── RESPONSIVE ──────────────────────────────────────────── */
+  @media (max-width:575.98px) {
+    .landing-logo { width:96px; }
+    .glass-card { padding:28px 14px 24px; }
+    .level-card  { padding:14px 10px; }
+    .level-icon  { font-size:1.8rem; }
+    h5.fw-bold { font-size:.95rem; }
+  }
+
+  /* ─── PRINT ───────────────────────────────────────────────── */
+  @media print {
+    .custom-navbar, .modal, .btn, #global-loading-overlay { display:none !important; }
+    body { background:white !important; padding:0; }
+    .card { box-shadow:none !important; border:1px solid #dee2e6 !important; }
+  }
+</style>
+
 </style>
