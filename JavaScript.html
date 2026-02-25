@@ -296,35 +296,46 @@ function loadDashboard() {
 /**
  * โหลด systemData พร้อม retry อัตโนมัติ (สูงสุด 3 ครั้ง, ห่างกัน 3 วินาที)
  */
+// 1. เพิ่มตัวแปรเช็คสถานะที่ด้านบนสุดของไฟล์ JavaScript.html (นอกฟังก์ชัน)
+var _isLoadingData = false;
+
 function _loadSystemDataWithRetry(attempt, onSuccess, onFail) {
+  // ป้องกันการเรียกฟังก์ชันซ้ำซ้อน ถ้ากำลังโหลดอยู่แล้วให้หยุดทันที
+  if (_isLoadingData && attempt === 0) return; 
+  _isLoadingData = true;
+
   var MAX = 3;
-  showGlobalLoading('กำลังโหลดข้อมูล...');
+  if (attempt === 0) showGlobalLoading('กำลังเตรียมข้อมูลระบบ...');
+  
   google.script.run
     .withSuccessHandler(function(data) {
       hideGlobalLoading();
+      _isLoadingData = false; // ปลดล็อกสถานะ
       systemData = data || [];
       uploadDocPersonList = systemData;
       _dataLoaded = true;
-      console.log('System data loaded successfully, count:', systemData.length);
-      onSuccess();
+      console.log('โหลดข้อมูลสำเร็จ:', systemData.length, 'รายการ');
+      if (typeof onSuccess === 'function') onSuccess();
     })
     .withFailureHandler(function(err) {
-      hideGlobalLoading();
       var msg = (err && err.message) ? err.message : String(err || '');
-      console.error('Load system data failed:', msg, 'Attempt:', attempt + 1);
+      console.error('โหลดข้อมูลไม่สำเร็จ:', msg, 'ครั้งที่:', attempt + 1);
       
-      var isRetryable = msg.indexOf('ยุ่งอยู่') >= 0 ||
-                        msg.indexOf('lock') >= 0 ||
-                        msg.indexOf('timeout') >= 0 ||
-                        msg.indexOf('Timeout') >= 0;
+      var isRetryable = msg.indexOf('ยุ่งอยู่') >= 0 || 
+                        msg.indexOf('lock') >= 0 || 
+                        msg.indexOf('timeout') >= 0;
                         
       if (isRetryable && attempt < MAX) {
-        var wait = (attempt + 1) * 3000; // 3s, 6s, 9s
-        showGlobalLoading('กำลังโหลดข้อมูล... (ลองใหม่ครั้งที่ ' + (attempt+1) + ')');
-        setTimeout(function() { _loadSystemDataWithRetry(attempt + 1, onSuccess, onFail); }, wait);
+        var wait = 2000; // ปรับลดเวลาให้ลองใหม่เร็วขึ้น (2 วินาทีพอ)
+        showGlobalLoading('ระบบยุ่งเล็กน้อย กำลังลองใหม่... (' + (attempt+1) + ')');
+        setTimeout(function() { 
+          _loadSystemDataWithRetry(attempt + 1, onSuccess, onFail); 
+        }, wait);
       } else {
-        console.error('Max retry attempts reached, failing...');
-        onFail(err);
+        hideGlobalLoading();
+        _isLoadingData = false; // ปลดล็อกสถานะ
+        if (typeof onFail === 'function') onFail(err);
+        else Swal.fire({ icon: 'error', title: 'การเชื่อมต่อขัดข้อง', text: 'กรุณากด Refresh หน้าจออีกครั้ง' });
       }
     })
     .getAllSystemData();
@@ -894,51 +905,118 @@ function filterUploadPersonList() {
 }
 
 function handleUploadDocSubmit(form) {
-  var typeEl     = document.querySelector('input[name="ud_type"]:checked');
-  var uploadType = typeEl ? typeEl.value : 'borrow';
-  var selVal     = document.getElementById('ud_personSelect').value;
-  if (!selVal) { Swal.fire({ icon: 'warning', title: 'กรุณาเลือกชื่อ' }); return false; }
-  var parts = selVal.split('|');
-  var p = uploadDocPersonList.find(function (x) {
-    return String(x.id) === String(parts[0]) && (x.source_sheet || '') === (parts[1] || '');
-  });
-  if (!p) { Swal.fire({ icon: 'error', title: 'ไม่พบข้อมูล กรุณาเลือกใหม่' }); return false; }
-  var fileInput = form.querySelector('[name="ud_file"]');
-  if (!fileInput || !fileInput.files[0]) { Swal.fire({ icon: 'warning', title: 'กรุณาเลือกไฟล์ PDF' }); return false; }
+  // 1. ป้องกันระบบโหลดหน้าเว็บซ้ำอัตโนมัติ
+  if (event) event.preventDefault();
+  
+  try {
+    var typeEl     = document.querySelector('input[name="ud_type"]:checked');
+    var uploadType = typeEl ? typeEl.value : 'borrow';
+    var selVal     = document.getElementById('ud_personSelect').value;
+    
+    if (!selVal) { 
+      Swal.fire({ icon: 'warning', title: 'กรุณาเลือกชื่อ' }); 
+      return false; 
+    }
+    
+    var parts = selVal.split('|');
+    var p = uploadDocPersonList.find(function (x) {
+      return String(x.id) === String(parts[0]) && (x.source_sheet || '') === (parts[1] || '');
+    });
+    
+    if (!p) { 
+      Swal.fire({ icon: 'error', title: 'ไม่พบข้อมูล กรุณาเลือกใหม่' }); 
+      return false; 
+    }
+    
+    var fileInput = form.querySelector('[name="ud_file"]');
+    if (!fileInput || !fileInput.files || !fileInput.files[0]) { 
+      Swal.fire({ icon: 'warning', title: 'กรุณาเลือกไฟล์ PDF' }); 
+      return false; 
+    }
 
-  var btn = document.querySelector('button[form="' + form.id + '"]');
-  var originalText = btn ? btn.innerHTML : 'อัปโหลด';
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>กำลังอัปโหลดไฟล์...';
+    // 2. ดึงปุ่มและล็อกปุ่มไว้กันกดซ้ำ
+    var btn = form.querySelector('button[type="submit"]') || document.querySelector('button[form="' + form.id + '"]');
+    var originalText = btn ? btn.innerHTML : 'อัปโหลด';
+    
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>กำลังประมวลผล...';
+    }
+
+    // เตรียมชุดข้อมูลส่งไปหลังบ้าน
+    var obj = {
+      userId: p.id, 
+      userName: p.name, 
+      userType: p.type, 
+      userRoom: p.room, 
+      userSerial: document.getElementById('ud_serial') ? document.getElementById('ud_serial').value : (p.serial || ''),
+      source_sheet: p.source_sheet || '', 
+      uploadType: uploadType,
+      note: (form.querySelector('[name="ud_note"]') || {}).value || ''
+    };
+
+    // 3. แปลงไฟล์ PDF เป็น Base64 แล้วส่งไปที่ Code.gs
+    readFileAsBase64(fileInput.files[0], function (b64) {
+      if (!b64) { 
+          if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+          Swal.fire({ icon: 'error', title: 'ไม่สามารถอ่านไฟล์ได้' }); 
+          return; 
+      }
+      
+      obj.file_b64 = b64;
+      if (typeof showGlobalLoading === 'function') showGlobalLoading('กำลังส่งข้อมูลไฟล์...');
+      
+      // ส่งข้อมูลไป Google Apps Script
+      google.script.run
+          .withSuccessHandler(function (res) {
+            // ✅ จุดแก้ปัญหาปุ่มค้าง: บังคับปลดล็อกปุ่มทันทีที่ได้รับข้อมูลกลับมา
+            if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+            if (typeof hideGlobalLoading === 'function') hideGlobalLoading();
+            
+            if (res && res.success) {
+              $('#uploadDocModal').modal('hide'); 
+              
+              Swal.fire({ 
+                icon: 'success', 
+                title: 'อัปโหลดเรียบร้อย', 
+                text: 'ระบบได้รับเอกสารแล้ว (หากต้องการตรวจสอบความถูกต้อง ให้กลับมาดูอีกครั้งใน 5 นาที)',
+                confirmButtonText: 'ตกลง'
+              });
+              
+              // อัปเดตตารางหน้าเว็บ (ใช้ Try-Catch กันระบบรวน)
+              try {
+                if (p) {
+                  if (uploadType === 'borrow') {
+                    p.docStatus = 'รอตรวจสอบ';
+                    if (!p.files) p.files = {};
+                    p.files.agreement = res.url || ''; 
+                  } else {
+                    p.borrowStatus = 'อยู่ระหว่างการส่งคืน';
+                    p.returnDocStatus = 'รอตรวจสอบ';
+                    p.returnDocUrl = res.url || '';
+                  }
+                }
+                if (typeof applyTableFilters === 'function') applyTableFilters();
+                if (typeof filterAdminTable === 'function') filterAdminTable();
+              } catch(e) {
+                console.log("วาดตารางใหม่ขัดข้อง (แต่ไฟล์อัปโหลดสำเร็จแล้ว): ", e);
+              }
+
+            } else {
+              Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: res ? res.message : 'ระบบไม่มีการตอบกลับ' });
+            }
+          })
+          .withFailureHandler(function (err) { 
+              // ✅ ปลดล็อกปุ่ม กรณีหลังบ้านแจ้ง Error
+              if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+              if (typeof hideGlobalLoading === 'function') hideGlobalLoading(); 
+              Swal.fire({ icon: 'error', title: 'การเชื่อมต่อขัดข้อง', text: String(err) });
+          })
+          .processUploadDoc(obj); // เรียกฟังก์ชันฝั่ง Code.gs
+    });
+  } catch (mainErr) {
+    Swal.fire({ icon: 'error', title: 'พบข้อขัดข้องในเบราว์เซอร์', text: mainErr.toString() });
   }
-
-  var obj = {
-    userId: p.id, userName: p.name, userType: p.type, userRoom: p.room, userSerial: p.serial,
-    source_sheet: p.source_sheet || '', uploadType: uploadType,
-    note: (form.querySelector('[name="ud_note"]') || {}).value || ''
-  };
-  readFileAsBase64(fileInput.files[0], function (b64) {
-    if (!b64) { Swal.fire({ icon: 'error', title: 'ไม่สามารถอ่านไฟล์ได้' }); return; }
-    obj.file_b64 = b64;
-    showGlobalLoading('กำลังอัปโหลดเอกสาร...');
-    google.script.run
-      .withSuccessHandler(function (res) {
-        hideGlobalLoading();
-        if (res.success) {
-          showToast('อัปโหลดเรียบร้อย');
-          $('#uploadDocModal').modal('hide');
-          _localUpdatePerson(p.id, p.source_sheet, {
-            borrowStatus: uploadType === 'return' ? 'อยู่ระหว่างการส่งคืน' : 'ยืมอยู่',
-            docStatus:    uploadType === 'borrow' ? 'รอตรวจสอบ' : undefined
-          });
-        } else {
-          Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: res.message });
-        }
-      })
-      .withFailureHandler(function (err) { hideGlobalLoading(); showError(err); })
-      .processUploadDoc(obj);
-  });
   return false;
 }
 
