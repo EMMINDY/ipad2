@@ -544,15 +544,14 @@
                   <i class="fas fa-barcode"></i> Serial Number iPad
                   <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem;" id="m_serial_hint">10 ตัวอักษร</span>
                 </label>
-                <div class="input-group input-group-sm mx-auto" style="max-width:260px;">
-                  <input type="text" class="form-control text-center fw-bold text-primary font-monospace"
-                         name="userSerial" id="m_userSerial_input"
-                         maxlength="10" autocomplete="off"
-                         placeholder="กรอก Serial 10 ตัว"
-                         style="letter-spacing:.08em; font-size:1rem;"
-                         oninput="updateSerialCounter(this)">
-                  <span class="input-group-text" id="m_serial_counter" style="font-size:.75rem; min-width:42px;">0/10</span>
-                </div>
+               <div class="input-group input-group-sm mx-auto" style="max-width:260px;">
+  <input type="text" class="form-control text-center fw-bold text-primary font-monospace bg-light"
+         name="userSerial" id="m_userSerial_input"
+         maxlength="10" autocomplete="off"
+         placeholder="ระบบกำหนดให้อัตโนมัติ"
+         style="letter-spacing:.08em; font-size:1rem; cursor: not-allowed;"
+         readonly>
+</div>
                 <div id="m_serial_msg" class="small mt-1" style="min-height:1.2em;"></div>
               </div>
               <div class="mt-2 d-flex justify-content-center gap-2">
