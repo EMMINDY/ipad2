@@ -654,7 +654,7 @@ function processUploadDoc(obj) {
     const timestamp = new Date();
     let url = "";
     let action       = "USER_UPDATE";
-    let statusToSave = "ยืมอยู่";
+    let statusToSave = ""; 
     let note         = obj.note || "";
     
     if (obj.uploadType === 'borrow') {
@@ -663,7 +663,9 @@ function processUploadDoc(obj) {
       const blob = base64ToBlob(obj.file_b64, fullName);
       if (!blob) return { success: false, message: "ไม่สามารถอ่านไฟล์ได้" };
       url          = folder.createFile(blob).setName(fullName).getUrl();
-      statusToSave = "ยืมอยู่ | รอตรวจสอบเอกสาร";
+      
+      statusToSave = "อัปโหลดเอกสาร | รอตรวจสอบ"; 
+      action       = "UPLOAD_DOC";
     } else {
       if (!obj.file_b64) return { success: false, message: "กรุณาเลือกไฟล์ PDF" };
       const fullName = "RETURN_ห้อง" + (obj.userRoom || "") + "_" + obj.userName + "_" + timestamp.getTime();
@@ -687,13 +689,21 @@ function processUploadDoc(obj) {
       if (targetSheet) {
         const sheetValues = targetSheet.getDataRange().getValues();
         const isTeacher   = obj.source_sheet === SHEET_NAMES.TEACHERS;
+        
         for (let i = 1; i < sheetValues.length; i++) {
           const rowId = isTeacher ? ('T-' + String(sheetValues[i][0])) : String(sheetValues[i][1]);
+          
           if (rowId === String(obj.userId)) {
-            const newBorrow = obj.uploadType === 'return' ? 'อยู่ระหว่างการส่งคืน' : 'ยืมอยู่';
+            const currentBorrow = sheetValues[i][10] || 'ยังไม่ยืม';
+            const newBorrow = obj.uploadType === 'return' ? 'อยู่ระหว่างการส่งคืน' : currentBorrow;
             const newDoc    = obj.uploadType === 'borrow' ? 'รอตรวจสอบ' : (sheetValues[i][11] || 'รอตรวจสอบ');
+            
             targetSheet.getRange(i + 1, 11).setValue(newBorrow);
-            if (obj.uploadType === 'borrow') targetSheet.getRange(i + 1, 12).setValue(newDoc);
+            if (obj.uploadType === 'borrow') {
+              targetSheet.getRange(i + 1, 12).setValue(newDoc);
+              // 👇 เพิ่มบรรทัดนี้ เพื่อบันทึกลิงก์ลงคอลัมน์ M (คอลัมน์ที่ 13)
+              targetSheet.getRange(i + 1, 13).setValue(url); 
+            }
             break;
           }
         }
@@ -701,8 +711,8 @@ function processUploadDoc(obj) {
     }
 
     invalidateSystemDataCache();
-    // ── FIX #5: ลบ syncAllNamesToSheet ออก ให้ Time Trigger จัดการ ──
-    return { success: true, message: "อัปโหลดเอกสารสำเร็จ" };
+    // 👇 แก้ไขบรรทัดนี้ ให้ส่ง url กลับไปที่หน้าเว็บด้วย
+    return { success: true, message: "อัปโหลดเอกสารสำเร็จ", url: url }; 
   } catch (e) {
     return { success: false, message: "เกิดข้อผิดพลาด: " + e.toString() };
   }
@@ -1490,58 +1500,54 @@ function processInventoryChanges(oldSerial, newSerial, newStatus, userName) {
  * ครูที่ปรึกษา: เพิ่มนักเรียนใหม่ในห้องตัวเอง
  * data: { targetSheet, id, name, room, advisorLevel, advisorRoom, editorName }
  */
+
+// ฟังก์ชันสำหรับครูที่ปรึกษากดเพิ่มรายชื่อนักเรียน
+// ฟังก์ชันสำหรับครูที่ปรึกษากดเพิ่มรายชื่อนักเรียน
 function advisorAddStudent(data) {
-  if (!data || !data.targetSheet || !data.name || !data.id) {
-    return { success: false, message: 'ข้อมูลไม่ครบถ้วน (ชื่อ, รหัส)' };
-  }
-  // ป้องกันการแก้ไขชีตที่ไม่ใช่ชีตนักเรียน
-  if (SHEET_NAMES.STUDENTS.indexOf(data.targetSheet) < 0) {
-    return { success: false, message: 'ไม่มีสิทธิ์เพิ่มในชีตนี้' };
-  }
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sheet = ss.getSheetByName(data.targetSheet);
-  if (!sheet) return { success: false, message: 'ไม่พบแผ่นงาน: ' + data.targetSheet };
-
   try {
-    // ตรวจสอบว่ารหัสนักเรียนซ้ำหรือไม่
-    const existing = sheet.getDataRange().getValues();
-    for (let i = 1; i < existing.length; i++) {
-      if (String(existing[i][1]).trim() === String(data.id).trim()) {
-        return { success: false, message: 'รหัสนักเรียน ' + data.id + ' มีอยู่ในระบบแล้ว' };
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    
+    // 1. ตรวจสอบชื่อชีต
+    const sheetNameRaw = data.targetSheet || data.source_sheet || '';
+    const targetSheetName = sheetNameRaw.trim();
+    
+    if (!targetSheetName) {
+       return { success: false, message: 'ไม่พบข้อมูลชื่อหน้าชีตที่จะเพิ่ม' };
+    }
+    
+    if (SHEET_NAMES.STUDENTS.indexOf(targetSheetName) < 0) {
+      return { success: false, message: 'ไม่มีสิทธิ์แก้ไขในชีตนี้ หรือชื่อชีตไม่ถูกต้อง' };
+    }
+
+    const sheet = ss.getSheetByName(targetSheetName);
+    if (!sheet) {
+      return { success: false, message: 'ไม่พบหน้าชีต: ' + targetSheetName };
+    }
+
+    // ==========================================
+    // 2. วิธีแก้ปัญหาข้อมูลทับกัน (เช็คบรรทัดสุดท้ายจากทุกคอลัมน์)
+    // ==========================================
+    // ดึงข้อมูลทั้งหมดในชีตมาตรวจสอบ
+    const vals = sheet.getDataRange().getValues();
+    let realLastRow = 1;
+    
+    // เช็คย้อนกลับจากบรรทัดล่างสุดขึ้นมาบนสุด
+    for (let i = vals.length - 1; i >= 0; i--) {
+      // เอาค่าทุกช่องในบรรทัดนั้นมารวมกัน ถ้าไม่ได้ว่างเปล่า แสดงว่าเป็นบรรทัดที่มีข้อมูลล่าสุด
+      if (vals[i].join('').trim() !== '') {
+        realLastRow = i + 2; // +1 เพื่อเป็นเลขแถวปกติ และ +1 เพื่อแทรกลงบรรทัดว่างถัดไป
+        break;
       }
     }
-    const nextNo = sheet.getLastRow(); // ใช้จำนวน row เป็นลำดับที่
-    const serialVal = data.serial && data.serial !== '-' ? String(data.serial).trim() : '-';
-    sheet.appendRow([nextNo, String(data.id).trim(), data.name.trim(), data.room || '', '', '', serialVal]);
+    
+    // นำข้อมูลไปวางต่อท้ายบรรทัดที่ว่างจริงๆ (ลำดับ, รหัสประจำตัว, ชื่อ-สกุล, ห้อง)
+    sheet.getRange(realLastRow, 1, 1, 4).setValues([[data.no, data.id, data.name, data.room]]);
 
-    // บันทึก Log
-    const logSheet = ss.getSheetByName(SHEET_NAMES.DATA_DB);
-    if (logSheet) {
-      logSheet.appendRow([
-        new Date(), data.id, data.name, 'student', data.room || '', '-',
-        'ADVISOR_ADD_STUDENT', 'เพิ่มรายชื่อนักเรียนโดย: ' + (data.editorName || 'ครูที่ปรึกษา'),
-        'ยังไม่ยืม', '', '', '', '', ''
-      ]);
-    }
-
+    // 3. เคลียร์ Cache เพื่อให้หน้าเว็บอัปเดตใหม่ทันที
     invalidateSystemDataCache();
-    
-    // อัปเดตชีตรายชื่อทั้งหมด
-    try {
-      const updatedData = getAllSystemData();
-      const syncResult = syncAllNamesToSheet(updatedData);
-      if (!syncResult.success) {
-        Logger.log('syncAllNamesToSheet failed in advisorAddStudent: ' + syncResult.error);
-        // ยังคืนค่าสำเร็จเพราะเพิ่มนักเรียนสำเร็จแล้ว
-        return { success: true, message: 'เพิ่มรายชื่อ "' + data.name + '" เรียบร้อยแล้ว (แต่ sync ชีตรายชื่อไม่สำเร็จ)' };
-      }
-    } catch (e) {
-      Logger.log('syncAllNamesToSheet error in advisorAddStudent: ' + e.toString());
-      // ยังคืนค่าสำเร็จเพราะเพิ่มนักเรียนสำเร็จแล้ว
-      return { success: true, message: 'เพิ่มรายชื่อ "' + data.name + '" เรียบร้อยแล้ว (แต่ sync ชีตรายชื่อไม่สำเร็จ)' };
-    }
-    
-    return { success: true, message: 'เพิ่มรายชื่อ "' + data.name + '" เรียบร้อยแล้ว' };
+
+    return { success: true, message: 'เพิ่มรายชื่อเรียบร้อยแล้ว' };
+
   } catch (e) {
     return { success: false, message: 'เกิดข้อผิดพลาด: ' + e.toString() };
   }
